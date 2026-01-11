@@ -308,7 +308,7 @@ public function login(Request $request)
                 ->orWhere('sede', 'ninguno');
             });
         }
-
+        $query->orderBy('updated_at', 'desc');
         return $query->get();
     }
 
