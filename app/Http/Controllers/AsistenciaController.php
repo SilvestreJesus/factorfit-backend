@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Asistencia;
 use App\Models\Usuario;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Http; // Importante para pegarle a la API
+use Illuminate\Support\Facades\File;
 use Carbon\Carbon;
 
 
@@ -257,4 +259,64 @@ public function reporteMensual(Request $request)
 
         return response()->json($data);
     }
+
+public function verificarRostro(Request $request) {
+    try {
+        $user = Usuario::where('clave_usuario', $request->clave)->first();
+        if (!$user || !$user->ruta_imagen) {
+            return response()->json(['success' => false, 'mensaje' => 'Usuario sin foto'], 404);
+        }
+
+        // 1. Preparar las imágenes (La guardada y la que viene de la cámara)
+        $fotoGuardada = public_path('storage/' . $user->ruta_imagen);
+        $imgData = str_replace('data:image/jpeg;base64,', '', $request->image);
+        $fotoCaptura = base64_decode(str_replace(' ', '+', $imgData));
+
+        // 2. Llamada a la API de Internet (Ejemplo: Azure Face API)
+        // Nota: Necesitas una KEY y un ENDPOINT que te dan al registrarte (gratis)
+        $apiKey = 'TU_AZURE_KEY';
+        $endpoint = 'https://tu-recurso.cognitiveservices.azure.com/face/v1.0';
+
+        // Paso A: Detectar rostro en foto de la cámara y obtener un ID
+        $res1 = Http::withHeaders(['Ocp-Apim-Subscription-Key' => $apiKey])
+            ->withBody($fotoCaptura, 'application/octet-stream')
+            ->post("$endpoint/detect?returnFaceId=true");
+
+        // Paso B: Detectar rostro en la foto guardada
+        $res2 = Http::withHeaders(['Ocp-Apim-Subscription-Key' => $apiKey])
+            ->withBody(File::get($fotoGuardada), 'application/octet-stream')
+            ->post("$endpoint/detect?returnFaceId=true");
+
+        $faceId1 = $res1->json()[0]['faceId'] ?? null;
+        $faceId2 = $res2->json()[0]['faceId'] ?? null;
+
+        if (!$faceId1 || !$faceId2) {
+            return response()->json(['success' => false, 'mensaje' => 'No se detectó rostro'], 400);
+        }
+
+        // Paso C: Verificar si son la misma persona
+        $verificacion = Http::withHeaders(['Ocp-Apim-Subscription-Key' => $apiKey])
+            ->post("$endpoint/verify", [
+                'faceId1' => $faceId1,
+                'faceId2' => $faceId2
+            ]);
+
+        // 3. Respuesta final
+        if ($verificacion->json()['isIdentical'] ?? false) {
+            // REGISTRAR ASISTENCIA AQUÍ (Igual que antes)
+            Asistencia::create([
+                'clave_cliente' => $user->clave_usuario,
+                'fecha_diario'  => now(),
+                'porcentaje'    => '100%'
+            ]);
+
+            return response()->json(['success' => true, 'mensaje' => 'Bienvenido ' . $user->nombres]);
+        }
+
+        return response()->json(['success' => false, 'mensaje' => 'El rostro no coincide'], 401);
+
+    } catch (\Exception $e) {
+        return response()->json(['success' => false, 'error' => 'Error de conexión con la IA'], 500);
+    }
+}    
 }

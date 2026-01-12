@@ -12,7 +12,10 @@ use App\Http\Controllers\AsistenciaController;
 use App\Http\Middleware\CorsMiddleware;
 use Illuminate\Support\Facades\File; 
 use App\Http\Controllers\WhatsAppController;
+use App\Http\Controllers\FileController;
 use App\Http\Controllers\PromocionController;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\Response;
 
 /*
 |--------------------------------------------------------------------------
@@ -142,3 +145,6 @@ Route::get('/usuarios/renovacion', [UsuarioController::class, 'usuariosParaRenov
 Route::get('/promociones', [PromocionController::class, 'index']);
 Route::post('/promociones', [PromocionController::class, 'store']);
 Route::delete('/promociones/{id}', [PromocionController::class, 'destroy']);
+
+Route::post('/asistencias/verificar-rostro', [AsistenciaController::class, 'verificarRostro']);
+
