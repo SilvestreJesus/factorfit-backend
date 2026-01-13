@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Mail;
+use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
 class UsuarioController extends Controller
 {
@@ -64,6 +65,14 @@ class UsuarioController extends Controller
         $validated['sede']   = $validated['sede'] ?? 'ninguno';
         $validated['password'] = bcrypt($validated['password']);
 
+        // 1. SUBIR FOTO DE PERFIL A CLOUDINARY
+        if ($request->hasFile('ruta_imagen')) {
+            $resultFoto = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
+                'folder' => 'usuarios/perfiles'
+            ]);
+            $validated['ruta_imagen'] = $resultFoto->getSecurePath();
+        }
+
         $usuario = null;
 
         DB::transaction(function() use (&$usuario, $validated) {
@@ -78,17 +87,23 @@ class UsuarioController extends Controller
 
             $usuario = Usuario::create($validated);
         });
+// 2. GENERAR QR CON PHP (ADIÓS PYTHON) Y SUBIR A CLOUDINARY
+        // Creamos el QR en memoria
+        $qrRaw = QrCode::format('png')
+            ->size(300)
+            ->margin(1)
+            ->generate("USUARIO:" . $usuario->clave_usuario);
 
-        // ---- EJECUTAR SCRIPT PYTHON PARA GENERAR QR ----
-        $command = "python " . base_path("python/qr_generator.py") . " " . $usuario->clave_usuario;
+        // Subimos el archivo binario directamente a Cloudinary
+        $resultQr = Cloudinary::upload("data:image/png;base64," . base64_encode($qrRaw), [
+            'folder' => 'usuarios/qrs'
+        ]);
 
-        $qrPath = trim(shell_exec($command));
-
-        $usuario->qr_imagen = $qrPath;
+        // Guardamos la URL de Cloudinary en la base de datos
+        $usuario->qr_imagen = $resultQr->getSecurePath();
         $usuario->save();
-
         return response()->json([
-            'message' => 'Usuario registrado y QR generado correctamente',
+            'message' => 'Usuario registrado, foto y QR guardados en la nube',
             'usuario' => $usuario
         ], 201);
     }
@@ -142,19 +157,19 @@ class UsuarioController extends Controller
             return response()->json(['message' => 'Usuario no encontrado'], 404);
         }
 
-        // ---- ELIMINAR FOTO ----
+            // ---- ELIMINAR FOTO DE CLOUDINARY ----
         if ($usuario->ruta_imagen) {
-            $path = str_replace('storage/', '', $usuario->ruta_imagen);
-            if (Storage::disk('public')->exists($path)) {
-                Storage::disk('public')->delete($path);
+            $publicIdFoto = $this->getPublicIdFromUrl($usuario->ruta_imagen);
+            if ($publicIdFoto) {
+                Cloudinary::destroy($publicIdFoto);
             }
         }
 
-        // ---- ELIMINAR QR ----
+        // ---- ELIMINAR QR DE CLOUDINARY ----
         if ($usuario->qr_imagen) {
-            $qrPath = str_replace('storage/', '', $usuario->qr_imagen);
-            if (Storage::disk('public')->exists($qrPath)) {
-                Storage::disk('public')->delete($qrPath);
+            $publicIdQr = $this->getPublicIdFromUrl($usuario->qr_imagen);
+            if ($publicIdQr) {
+                Cloudinary::destroy($publicIdQr);
             }
         }
 
@@ -355,7 +370,6 @@ public function usuariosParaRenovacion(Request $request)
         return response()->json($usuarios);
     }
 
-
 public function subirFoto(Request $request, $clave)
 {
     $request->validate([
@@ -364,26 +378,27 @@ public function subirFoto(Request $request, $clave)
 
     $usuario = Usuario::where('clave_usuario', $clave)->firstOrFail();
 
-    // Guardar imagen
-    $path = $request->file('foto')->store('usuarios', 'public');
-
-    // Eliminar foto anterior correctamente
+    // ---- NUEVO: ELIMINAR FOTO ANTERIOR DE CLOUDINARY ----
     if ($usuario->ruta_imagen) {
-        $oldPath = str_replace('storage/', '', $usuario->ruta_imagen);
-        if (\Storage::disk('public')->exists($oldPath)) {
-            \Storage::disk('public')->delete($oldPath);
+        $publicIdViejo = $this->getPublicIdFromUrl($usuario->ruta_imagen);
+        if ($publicIdViejo) {
+            Cloudinary::destroy($publicIdViejo);
         }
     }
 
-    // Guardar solo la ruta interna
-    $usuario->ruta_imagen = 'storage/' . $path;
+    // Subida de la nueva foto
+    $result = Cloudinary::upload($request->file('foto')->getRealPath(), [
+        'folder' => 'usuarios/perfiles'
+    ]);
+
+    $usuario->ruta_imagen = $result->getSecurePath();
     $usuario->save();
 
     return response()->json([
+        'message' => 'Foto actualizada y anterior eliminada de Cloudinary',
         'ruta_imagen' => $usuario->ruta_imagen
     ]);
 }
-
 
 public function enviarCorreo(Request $request)
 {
@@ -497,9 +512,6 @@ public function obtenerClientesActivosSede(Request $request)
     return response()->json($query->get());
 }
 
-/**
- * Eliminación física de la base de datos por clave_usuario.
- */
 public function eliminarUsuarioPermanente($clave)
 {
     $usuario = Usuario::where('clave_usuario', $clave)->first();
@@ -508,11 +520,47 @@ public function eliminarUsuarioPermanente($clave)
         return response()->json(['message' => 'Usuario no encontrado'], 404);
     }
 
-    // Al usar delete(), se borra físicamente. 
-    // Si tienes OnDelete('cascade') en la DB, se borrarán sus pagos.
+    // ---- NUEVO: LIMPIEZA DE NUBE ANTES DE BORRAR REGISTRO ----
+    if ($usuario->ruta_imagen) {
+        $idFoto = $this->getPublicIdFromUrl($usuario->ruta_imagen);
+        if ($idFoto) Cloudinary::destroy($idFoto);
+    }
+
+    if ($usuario->qr_imagen) {
+        $idQr = $this->getPublicIdFromUrl($usuario->qr_imagen);
+        if ($idQr) Cloudinary::destroy($idQr);
+    }
+
     $usuario->delete(); 
 
-    return response()->json(['message' => 'Usuario eliminado permanentemente del sistema']);
+    return response()->json(['message' => 'Usuario e imágenes eliminados permanentemente']);
+}
+
+
+private function getPublicIdFromUrl($url)
+{
+    // Ejemplo de URL: https://res.cloudinary.com/demo/image/upload/v12345/usuarios/perfiles/identificador.jpg
+    // Esta lógica extrae "usuarios/perfiles/identificador"
+    
+    $path = parse_url($url, PHP_URL_PATH); // Obtiene la ruta después del dominio
+    $parts = explode('/', $path);
+    
+    // Buscamos a partir de la carpeta que definimos (usuarios)
+    $index = array_search('usuarios', $parts);
+    
+    if ($index !== false) {
+        $relevantParts = array_slice($parts, $index);
+        $fileWithExtension = end($relevantParts);
+        $fileName = pathinfo($fileWithExtension, PATHINFO_FILENAME);
+        
+        // Reemplazamos la última parte por el nombre sin extensión
+        array_pop($relevantParts);
+        $relevantParts[] = $fileName;
+        
+        return implode('/', $relevantParts);
+    }
+
+    return null;
 }
 
 }

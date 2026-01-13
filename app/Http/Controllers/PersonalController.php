@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Personal;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+// Importamos Cloudinary para el manejo de imágenes en la nube
+use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
 class PersonalController extends Controller
 {
@@ -12,7 +14,7 @@ class PersonalController extends Controller
     {
         $query = Personal::query();
 
-        // Filtrar por sede si se pasa como query (opcional)
+        // Filtrar por sede si se pasa como query
         if ($request->has('sede')) {
             $sede = $request->query('sede');
             $query->where('sede', $sede);
@@ -39,40 +41,38 @@ class PersonalController extends Controller
             'ruta_imagen' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048'
         ]);
 
-
         $validated['rol'] = $validated['rol'] ?? 'personal';
 
-        // Subir imagen si viene
+        // SUBIDA A CLOUDINARY
         if ($request->hasFile('ruta_imagen')) {
-            $path = $request->file('ruta_imagen')->store('personal', 'public');
-            $validated['ruta_imagen'] = "storage/$path";
+            // Subimos a la carpeta 'personal' en Cloudinary
+            $result = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
+                'folder' => 'personal'
+            ]);
+            // Guardamos la URL segura que nos devuelve Cloudinary
+            $validated['ruta_imagen'] = $result->getSecurePath();
         }
-
 
         $personal = null;
 
         DB::transaction(function () use (&$personal, $validated) {
-
             $lastNumber = DB::table('personal')
                 ->selectRaw("MAX(CAST(SUBSTRING(clave_personal FROM 5) AS INTEGER)) AS max_num")
                 ->value('max_num');
 
             $newNumber = $lastNumber ? $lastNumber + 1 : 1;
-
             $validated['clave_personal'] = 'PERS' . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
 
             $personal = Personal::create($validated);
         });
 
         return response()->json([
-            'message' => 'Personal registrado correctamente',
+            'message' => 'Personal registrado correctamente en Cloudinary',
             'personal' => $personal
         ], 201);
     }
 
-
-
-    public function update(Request $request, $clave)
+public function update(Request $request, $clave)
     {
         $personal = Personal::where('clave_personal', $clave)->firstOrFail();
 
@@ -80,29 +80,27 @@ class PersonalController extends Controller
         $personal->puesto = $request->puesto;
         $personal->descripcion = $request->descripcion;
         $personal->sede = $request->sede;
-        $personal->rol = 'personal';
+        $personal->rol = $request->rol ?? 'personal';
 
         if ($request->hasFile('ruta_imagen')) {
-
-        // Eliminar imagen anterior si existe
-        if ($personal->ruta_imagen) {
-            // Convierte "storage/personal/archivo.jpg" a "storage/app/public/personal/archivo.jpg"
-            $rutaAnterior = str_replace('storage', storage_path('app/public'), $personal->ruta_imagen);
-
-            if (file_exists($rutaAnterior)) {
-                unlink($rutaAnterior);
+            // 1. BORRAR FOTO ANTERIOR DE CLOUDINARY PARA NO ACUMULAR BASURA
+            if ($personal->ruta_imagen) {
+                $publicId = $this->getPublicIdFromUrl($personal->ruta_imagen);
+                if ($publicId) {
+                    Cloudinary::destroy($publicId);
+                }
             }
+
+            // 2. SUBIR LA NUEVA
+            $result = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
+                'folder' => 'personal'
+            ]);
+            $personal->ruta_imagen = $result->getSecurePath();
         }
 
-        // Subir nueva imagen
-        $rutaNueva = $request->file('ruta_imagen')->store('personal', 'public');
-        $personal->ruta_imagen = 'storage/' . $rutaNueva;
-        }
         $personal->save();
-
         return response()->json(['message' => 'Personal actualizado correctamente']);
     }
-
 
     public function destroy($clave_personal)
     {
@@ -112,17 +110,39 @@ class PersonalController extends Controller
             return response()->json(['message' => 'Registro no encontrado'], 404);
         }
 
-        // Eliminar imagen física si existe
-        if ($item->ruta_imagen && file_exists(public_path($item->ruta_imagen))) {
-            unlink(public_path($item->ruta_imagen));
+        // ELIMINAR FOTO DE CLOUDINARY
+        if ($item->ruta_imagen) {
+            $publicId = $this->getPublicIdFromUrl($item->ruta_imagen);
+            if ($publicId) {
+                Cloudinary::destroy($publicId);
+            }
         }
 
-        // Eliminar registro
         $item->delete();
-
-        return response()->json(['message' => 'Eliminado correctamente']);
+        return response()->json(['message' => 'Personal e imagen eliminados correctamente']);
     }
-    // Opcional: búsqueda por texto
+
+    // FUNCIÓN PARA EXTRAER EL ID (Buscando la carpeta 'personal')
+    private function getPublicIdFromUrl($url)
+    {
+        $path = parse_url($url, PHP_URL_PATH);
+        $parts = explode('/', $path);
+        
+        $index = array_search('personal', $parts);
+        
+        if ($index !== false) {
+            $relevantParts = array_slice($parts, $index);
+            $fileWithExtension = end($relevantParts);
+            $fileName = pathinfo($fileWithExtension, PATHINFO_FILENAME);
+            
+            array_pop($relevantParts);
+            $relevantParts[] = $fileName;
+            
+            return implode('/', $relevantParts);
+        }
+        return null;
+    }
+
     public function buscar(Request $request)
     {
         $texto = $request->input('texto', '');

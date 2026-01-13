@@ -5,6 +5,8 @@ namespace App\Http\Controllers;
 use App\Models\Entrenamientos;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+// Importamos el Facade de Cloudinary
+use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
 class EntrenamientosController extends Controller
 {
@@ -12,7 +14,6 @@ class EntrenamientosController extends Controller
     {
         $query = Entrenamientos::query();
 
-        // Filtrar por sede si se pasa como query (opcional)
         if ($request->has('sede')) {
             $sede = $request->query('sede');
             $query->where('sede', $sede);
@@ -37,37 +38,31 @@ class EntrenamientosController extends Controller
             'ruta_imagen' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048'
         ]);
 
-
-
-        // Subir imagen si viene
         if ($request->hasFile('ruta_imagen')) {
-            $path = $request->file('ruta_imagen')->store('entrenamientos', 'public');
-            $validated['ruta_imagen'] = "storage/$path";
+            $result = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
+                'folder' => 'entrenamientos'
+            ]);
+            $validated['ruta_imagen'] = $result->getSecurePath();
         }
-
 
         $entrenamientos = null;
 
         DB::transaction(function () use (&$entrenamientos, $validated) {
-
             $lastNumber = DB::table('entrenamientos')
                 ->selectRaw("MAX(CAST(SUBSTRING(clave_entrenamientos FROM 5) AS INTEGER)) AS max_num")
                 ->value('max_num');
 
             $newNumber = $lastNumber ? $lastNumber + 1 : 1;
-
             $validated['clave_entrenamientos'] = 'ETRE' . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
 
             $entrenamientos = Entrenamientos::create($validated);
         });
 
         return response()->json([
-            'message' => 'entrenamientos registrado correctamente',
+            'message' => 'Entrenamiento registrado correctamente',
             'entrenamientos' => $entrenamientos
         ], 201);
     }
-
-
 
     public function update(Request $request, $clave)
     {
@@ -78,26 +73,25 @@ class EntrenamientosController extends Controller
         $entrenamientos->sede = $request->sede;
 
         if ($request->hasFile('ruta_imagen')) {
-
-            // Eliminar imagen anterior si existe
+            // 1. ELIMINAR IMAGEN ANTERIOR DE CLOUDINARY
             if ($entrenamientos->ruta_imagen) {
-                $rutaAnterior = str_replace('storage', storage_path('app/public'), $entrenamientos->ruta_imagen);
-                if (file_exists($rutaAnterior)) {
-                    unlink($rutaAnterior);
+                $publicId = $this->getPublicIdFromUrl($entrenamientos->ruta_imagen);
+                if ($publicId) {
+                    Cloudinary::destroy($publicId);
                 }
             }
 
-            // Subir nueva imagen
-            $rutaNueva = $request->file('ruta_imagen')->store('entrenamientos', 'public');
-            $entrenamientos->ruta_imagen = 'storage/' . $rutaNueva;
+            // 2. SUBIR LA NUEVA
+            $result = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
+                'folder' => 'entrenamientos'
+            ]);
+            $entrenamientos->ruta_imagen = $result->getSecurePath();
         }
-
 
         $entrenamientos->save();
 
-        return response()->json(['message' => 'entrenamientos actualizado correctamente']);
+        return response()->json(['message' => 'Entrenamiento actualizado correctamente']);
     }
-
 
     public function destroy($clave_entrenamientos)
     {
@@ -107,22 +101,44 @@ class EntrenamientosController extends Controller
             return response()->json(['message' => 'Registro no encontrado'], 404);
         }
 
-        // Eliminar imagen física si existe
-        if ($item->ruta_imagen && file_exists(public_path($item->ruta_imagen))) {
-            unlink(public_path($item->ruta_imagen));
+        // ELIMINAR IMAGEN DE CLOUDINARY AL BORRAR EL REGISTRO
+        if ($item->ruta_imagen) {
+            $publicId = $this->getPublicIdFromUrl($item->ruta_imagen);
+            if ($publicId) {
+                Cloudinary::destroy($publicId);
+            }
         }
 
-        // Eliminar registro
         $item->delete();
 
-        return response()->json(['message' => 'Eliminado correctamente']);
+        return response()->json(['message' => 'Entrenamiento e imagen eliminados correctamente']);
     }
-    // Opcional: búsqueda por texto
+
+    // FUNCIÓN AUXILIAR PARA EXTRAER EL PUBLIC ID
+    private function getPublicIdFromUrl($url)
+    {
+        $path = parse_url($url, PHP_URL_PATH);
+        $parts = explode('/', $path);
+        
+        $index = array_search('entrenamientos', $parts);
+        
+        if ($index !== false) {
+            $relevantParts = array_slice($parts, $index);
+            $fileWithExtension = end($relevantParts);
+            $fileName = pathinfo($fileWithExtension, PATHINFO_FILENAME);
+            
+            array_pop($relevantParts);
+            $relevantParts[] = $fileName;
+            
+            return implode('/', $relevantParts);
+        }
+        return null;
+    }
+
     public function buscar(Request $request)
     {
         $texto = $request->input('texto', '');
-        $result = Entrenamientos::where('titulo', 'LIKE', "%$texto%")
-            ->get();
+        $result = Entrenamientos::where('titulo', 'LIKE', "%$texto%")->get();
 
         return response()->json($result);
     }
