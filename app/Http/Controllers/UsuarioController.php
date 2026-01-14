@@ -370,35 +370,24 @@ public function usuariosParaRenovacion(Request $request)
         return response()->json($usuarios);
     }
 
+
 public function subirFoto(Request $request, $clave)
 {
+    // Ahora solo validamos que llegue un string (la URL)
     $request->validate([
-        'foto' => 'required|image|max:2048'
+        'ruta_imagen' => 'required|string'
     ]);
 
     $usuario = Usuario::where('clave_usuario', $clave)->firstOrFail();
-
-    // ---- NUEVO: ELIMINAR FOTO ANTERIOR DE CLOUDINARY ----
-    if ($usuario->ruta_imagen) {
-        $publicIdViejo = $this->getPublicIdFromUrl($usuario->ruta_imagen);
-        if ($publicIdViejo) {
-            Cloudinary::destroy($publicIdViejo);
-        }
-    }
-
-    // Subida de la nueva foto
-    $result = Cloudinary::upload($request->file('foto')->getRealPath(), [
-        'folder' => 'usuarios/perfiles'
-    ]);
-
-    $usuario->ruta_imagen = $result->getSecurePath();
+    $usuario->ruta_imagen = $request->ruta_imagen;
     $usuario->save();
 
     return response()->json([
-        'message' => 'Foto actualizada y anterior eliminada de Cloudinary',
+        'message' => 'Ruta guardada correctamente',
         'ruta_imagen' => $usuario->ruta_imagen
     ]);
 }
+
 
 public function enviarCorreo(Request $request)
 {

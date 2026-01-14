@@ -5,145 +5,133 @@ namespace App\Http\Controllers;
 use App\Models\Instalaciones;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-// Importamos Cloudinary
+use Illuminate\Support\Facades\Log; 
 use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
-
 class InstalacionesController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Instalaciones::query();
-
+        $query = Instalaciones::latest();
         if ($request->has('sede')) {
-            $sede = $request->query('sede');
-            $query->where('sede', $sede);
+            $query->where('sede', $request->query('sede'));
         }
-
         return response()->json($query->get());
     }
 
     public function show($id)
     {
+        // Usamos find para ser consistentes con Instalaciones
         $item = Instalaciones::find($id);
-        return $item ? response()->json($item)
-                     : response()->json(['message' => 'Registro no encontrado'], 404);
+        return $item ? response()->json($item) 
+                     : response()->json(['message' => 'No encontrado'], 404);
     }
 
     public function store(Request $request)
     {
-        $validated = $request->validate([
-            'titulo' => 'required|string|max:150',
-            'descripcion' => 'nullable|string',
-            'sede' => 'required|string|max:30',
-            'ruta_imagen' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048'
-        ]);
-
-        // SUBIDA A CLOUDINARY
-        if ($request->hasFile('ruta_imagen')) {
-            $result = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
-                'folder' => 'instalaciones'
+        try {
+            $validated = $request->validate([
+                'titulo'      => 'required|string|max:150',
+                'descripcion' => 'nullable|string',
+                'sede'        => 'required|string|max:30',
+                'ruta_imagen' => 'nullable|string' 
             ]);
-            // Guardamos la URL permanente de la nube
-            $validated['ruta_imagen'] = $result->getSecurePath();
+
+            $instalacion = null;
+            DB::transaction(function () use (&$instalacion, $validated) {
+                // Usamos INTEGER para que sea igual a Instalaciones
+                $lastNumber = DB::table('instalaciones')
+                    ->selectRaw("MAX(CAST(SUBSTRING(clave_instalaciones FROM 5) AS INTEGER)) AS max_num")
+                    ->value('max_num');
+
+                $newNumber = $lastNumber ? $lastNumber + 1 : 1;
+                $validated['clave_instalaciones'] = 'INST' . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
+
+                $instalacion = Instalaciones::create($validated);
+            });
+
+            return response()->json($instalacion, 201);
+        } catch (\Exception $e) {
+            Log::error("Error en Store Instalaciones: " . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
         }
-
-        $instalaciones = null;
-
-        DB::transaction(function () use (&$instalaciones, $validated) {
-            $lastNumber = DB::table('instalaciones')
-                ->selectRaw("MAX(CAST(SUBSTRING(clave_instalaciones FROM 5) AS INTEGER)) AS max_num")
-                ->value('max_num');
-
-            $newNumber = $lastNumber ? $lastNumber + 1 : 1;
-            $validated['clave_instalaciones'] = 'INST' . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
-
-            $instalaciones = Instalaciones::create($validated);
-        });
-
-        return response()->json([
-            'message' => 'Instalación registrada correctamente en Cloudinary',
-            'instalaciones' => $instalaciones
-        ], 201);
     }
 
 public function update(Request $request, $clave)
     {
-        $instalaciones = Instalaciones::where('clave_instalaciones', $clave)->firstOrFail();
+        try {
+            $item = Instalaciones::where('clave_instalaciones', $clave)->firstOrFail();
+            $urlVieja = $item->ruta_imagen;
+            $urlNueva = $request->input('ruta_imagen');
 
-        $instalaciones->titulo = $request->titulo;
-        $instalaciones->descripcion = $request->descripcion;
-        $instalaciones->sede = $request->sede;
+            // Solo intentamos borrar si la URL cambió y no está vacía
+            if (!empty($urlNueva) && $urlNueva !== $urlVieja) {
+                $this->borrarImagenCloudinary($urlVieja);
+            }
 
-        if ($request->hasFile('ruta_imagen')) {
-            // 1. ELIMINAR IMAGEN ANTERIOR DE CLOUDINARY
-            if ($instalaciones->ruta_imagen) {
-                $publicId = $this->getPublicIdFromUrl($instalaciones->ruta_imagen);
+            $item->update($request->only(['titulo', 'descripcion', 'sede', 'ruta_imagen']));
+            return response()->json(['message' => 'Actualizado correctamente']);
+        } catch (\Exception $e) {
+            Log::error("Error en Update Instalaciones: " . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function destroy($clave)
+    {
+        try {
+            $item = Instalaciones::where('clave_instalaciones', $clave)->firstOrFail();
+            
+            if ($item->ruta_imagen) {
+                $this->borrarImagenCloudinary($item->ruta_imagen);
+            }
+            
+            $item->delete();
+            return response()->json(['message' => 'Eliminado correctamente']);
+        } catch (\Exception $e) {
+            Log::error("Error en Destroy instalaciones: " . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function destruirImagen(Request $request)
+    {
+        $url = $request->input('url');
+        if ($url && str_contains($url, 'cloudinary.com')) {
+            try {
+                $publicId = $this->getPublicIdFromUrl($url);
+                if ($publicId) {
+                    Cloudinary::destroy($publicId);
+                    return response()->json(['message' => 'Imagen eliminada de la nube']);
+                }
+            } catch (\Exception $e) {
+                Log::warning("No se pudo borrar la imagen en Cloudinary: " . $e->getMessage());
+            }
+        }
+        return response()->json(['message' => 'Proceso completado (con o sin borrado de nube)']);
+    }
+
+    private function borrarImagenCloudinary($url)
+    {
+        try {
+            if ($url && str_contains($url, 'cloudinary.com')) {
+                $publicId = $this->getPublicIdFromUrl($url);
                 if ($publicId) {
                     Cloudinary::destroy($publicId);
                 }
             }
-
-            // 2. SUBIR LA NUEVA
-            $result = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
-                'folder' => 'instalaciones'
-            ]);
-            $instalaciones->ruta_imagen = $result->getSecurePath();
+        } catch (\Exception $e) {
+            Log::error("Falla crítica al borrar en Cloudinary: " . $e->getMessage());
         }
-
-        $instalaciones->save();
-
-        return response()->json(['message' => 'Instalación actualizada correctamente']);
     }
 
-    public function destroy($clave_instalaciones)
-    {
-        $item = Instalaciones::where('clave_instalaciones', $clave_instalaciones)->first();
-
-        if (!$item) {
-            return response()->json(['message' => 'Registro no encontrado'], 404);
-        }
-
-        // ELIMINAR IMAGEN DE CLOUDINARY AL BORRAR EL REGISTRO
-        if ($item->ruta_imagen) {
-            $publicId = $this->getPublicIdFromUrl($item->ruta_imagen);
-            if ($publicId) {
-                Cloudinary::destroy($publicId);
-            }
-        }
-
-        $item->delete();
-
-        return response()->json(['message' => 'Instalación e imagen eliminadas correctamente']);
-    }
-
-    // FUNCIÓN AUXILIAR PARA EXTRAER EL PUBLIC ID DE CLOUDINARY
     private function getPublicIdFromUrl($url)
     {
-        $path = parse_url($url, PHP_URL_PATH);
-        $parts = explode('/', $path);
-        
-        // Buscamos la carpeta contenedora 'instalaciones'
-        $index = array_search('instalaciones', $parts);
-        
-        if ($index !== false) {
-            $relevantParts = array_slice($parts, $index);
-            $fileWithExtension = end($relevantParts);
-            $fileName = pathinfo($fileWithExtension, PATHINFO_FILENAME);
-            
-            array_pop($relevantParts);
-            $relevantParts[] = $fileName;
-            
-            return implode('/', $relevantParts);
+        // Esta regex extrae "Instalaciones/nombre_archivo" de la URL de Cloudinary
+        if (preg_match('/upload\/v\d+\/(.+)\.[a-z]{3,4}$/i', $url, $matches)) {
+            return $matches[1];
         }
         return null;
     }
 
 
-    public function buscar(Request $request)
-    {
-        $texto = $request->input('texto', '');
-        $result = Instalaciones::where('titulo', 'LIKE', "%$texto%")->get();
-
-        return response()->json($result);
-    }
 }

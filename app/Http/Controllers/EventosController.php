@@ -5,14 +5,14 @@ namespace App\Http\Controllers;
 use App\Models\Eventos;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-// Importamos el Facade de Cloudinary
+use Illuminate\Support\Facades\Log; 
 use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
 class EventosController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Eventos::query();
+        $query = Eventos::latest();
 
         if ($request->has('sede')) {
             $sede = $request->query('sede');
@@ -29,120 +29,106 @@ class EventosController extends Controller
                      : response()->json(['message' => 'Registro no encontrado'], 404);
     }
 
-    public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'titulo' => 'required|string|max:150',
-            'descripcion' => 'nullable|string',
-            'sede' => 'required|string|max:30',
-            'ruta_imagen' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048'
-        ]);
+public function store(Request $request)
+{
+    $validated = $request->validate([
+        'titulo'      => 'required|string|max:150',
+        'descripcion' => 'nullable|string',
+        'sede'        => 'required|string|max:30',
+        'ruta_imagen' => 'nullable|string' // Ahora es solo un string (URL)
+    ]);
 
-        // SUBIDA A CLOUDINARY
-        if ($request->hasFile('ruta_imagen')) {
-            // Se sube a la carpeta 'eventos' dentro de Cloudinary
-            $result = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
-                'folder' => 'eventos'
-            ]);
-            // Guardamos la URL segura que nos da la nube
-            $validated['ruta_imagen'] = $result->getSecurePath();
-        }
+    DB::transaction(function () use (&$eventos, $validated) {
+        $lastNumber = DB::table('eventos')
+            ->selectRaw("MAX(CAST(SUBSTRING(clave_eventos FROM 5) AS INTEGER)) AS max_num")
+            ->value('max_num');
 
-        $eventos = null;
+        $newNumber = $lastNumber ? $lastNumber + 1 : 1;
+        $validated['clave_eventos'] = 'EVEN' . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
 
-        DB::transaction(function () use (&$eventos, $validated) {
-            $lastNumber = DB::table('eventos')
-                ->selectRaw("MAX(CAST(SUBSTRING(clave_eventos FROM 5) AS INTEGER)) AS max_num")
-                ->value('max_num');
+        $eventos = Eventos::create($validated);
+    });
 
-            $newNumber = $lastNumber ? $lastNumber + 1 : 1;
-            $validated['clave_eventos'] = 'EVEN' . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
+    return response()->json(['message' => 'Evento guardado', 'eventos' => $eventos], 201);
+}
 
-            $eventos = Eventos::create($validated);
-        });
-
-        return response()->json([
-            'message' => 'Evento registrado correctamente en Cloudinary',
-            'eventos' => $eventos
-        ], 201);
-    }
 
 public function update(Request $request, $clave)
     {
-        $eventos = Eventos::where('clave_eventos', $clave)->firstOrFail();
+        try {
+            $evento = Eventos::where('clave_eventos', $clave)->firstOrFail();
+            $urlVieja = $evento->ruta_imagen;
+            $urlNueva = $request->input('ruta_imagen');
 
-        $eventos->titulo = $request->titulo;
-        $eventos->descripcion = $request->descripcion;
-        $eventos->sede = $request->sede;
+            // Solo intentamos borrar si la URL cambió y no está vacía
+            if (!empty($urlNueva) && $urlNueva !== $urlVieja) {
+                $this->borrarImagenCloudinary($urlVieja);
+            }
 
-        if ($request->hasFile('ruta_imagen')) {
-            // 1. ELIMINAR IMAGEN ANTERIOR DE LA NUBE
-            if ($eventos->ruta_imagen) {
-                $publicId = $this->getPublicIdFromUrl($eventos->ruta_imagen);
+            $evento->update($request->only(['titulo', 'descripcion', 'sede', 'ruta_imagen']));
+            return response()->json(['message' => 'Actualizado correctamente']);
+        } catch (\Exception $e) {
+            Log::error("Error en Update Eventos: " . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function destroy($clave)
+    {
+        try {
+            $evento = Eventos::where('clave_eventos', $clave)->firstOrFail();
+            
+            if ($evento->ruta_imagen) {
+                $this->borrarImagenCloudinary($evento->ruta_imagen);
+            }
+            
+            $evento->delete();
+            return response()->json(['message' => 'Eliminado correctamente']);
+        } catch (\Exception $e) {
+            Log::error("Error en Destroy Eventos: " . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function destruirImagen(Request $request)
+    {
+        $url = $request->input('url');
+        if ($url && str_contains($url, 'cloudinary.com')) {
+            try {
+                $publicId = $this->getPublicIdFromUrl($url);
+                if ($publicId) {
+                    Cloudinary::destroy($publicId);
+                    return response()->json(['message' => 'Imagen eliminada de la nube']);
+                }
+            } catch (\Exception $e) {
+                Log::warning("No se pudo borrar la imagen en Cloudinary: " . $e->getMessage());
+            }
+        }
+        return response()->json(['message' => 'Proceso completado (con o sin borrado de nube)']);
+    }
+
+    private function borrarImagenCloudinary($url)
+    {
+        try {
+            if ($url && str_contains($url, 'cloudinary.com')) {
+                $publicId = $this->getPublicIdFromUrl($url);
                 if ($publicId) {
                     Cloudinary::destroy($publicId);
                 }
             }
-
-            // 2. SUBIR LA NUEVA IMAGEN
-            $result = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
-                'folder' => 'eventos'
-            ]);
-            $eventos->ruta_imagen = $result->getSecurePath();
+        } catch (\Exception $e) {
+            Log::error("Falla crítica al borrar en Cloudinary: " . $e->getMessage());
         }
-
-        $eventos->save();
-
-        return response()->json(['message' => 'Evento actualizado correctamente']);
     }
 
-    public function destroy($clave_eventos)
-    {
-        $item = Eventos::where('clave_eventos', $clave_eventos)->first();
-
-        if (!$item) {
-            return response()->json(['message' => 'Registro no encontrado'], 404);
-        }
-
-        // ELIMINAR IMAGEN DE CLOUDINARY
-        if ($item->ruta_imagen) {
-            $publicId = $this->getPublicIdFromUrl($item->ruta_imagen);
-            if ($publicId) {
-                Cloudinary::destroy($publicId);
-            }
-        }
-
-        $item->delete();
-
-        return response()->json(['message' => 'Evento e imagen eliminados correctamente']);
-    }
-
-    // FUNCIÓN AUXILIAR PARA ELIMINAR DE CLOUDINARY
     private function getPublicIdFromUrl($url)
     {
-        $path = parse_url($url, PHP_URL_PATH);
-        $parts = explode('/', $path);
-        
-        $index = array_search('eventos', $parts);
-        
-        if ($index !== false) {
-            $relevantParts = array_slice($parts, $index);
-            $fileWithExtension = end($relevantParts);
-            $fileName = pathinfo($fileWithExtension, PATHINFO_FILENAME);
-            
-            array_pop($relevantParts);
-            $relevantParts[] = $fileName;
-            
-            return implode('/', $relevantParts);
+        // Esta regex extrae "eventos/nombre_archivo" de la URL de Cloudinary
+        if (preg_match('/upload\/v\d+\/(.+)\.[a-z]{3,4}$/i', $url, $matches)) {
+            return $matches[1];
         }
         return null;
     }
 
-    public function buscar(Request $request)
-    {
-        $texto = $request->input('texto', '');
-        $result = Eventos::where('titulo', 'LIKE', "%$texto%")->get();
 
-        return response()->json($result);
-    }    
 }

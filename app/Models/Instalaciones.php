@@ -20,3 +20,6 @@ class Instalaciones extends Model
         'sede',
     ];
 }
+
+
+

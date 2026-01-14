@@ -55,14 +55,39 @@ Route::get('/asistencias/mes/{clave}/{year}/{month}', [AsistenciaController::cla
 Route::resource('asistencias', AsistenciaController::class)->except(['create', 'edit']);
 
 // ---------- CONTENIDO (EVENTOS, ENTRENAMIENTOS, INSTALACIONES) ----------
-Route::resource('eventos', EventosController::class)->except(['create', 'edit']);
+
+// api.php
+
+// 1. Rutas específicas primero
+Route::post('eventos/destruir-imagen', [EventosController::class, 'destruirImagen']);
 Route::get('/buscar/eventos/{texto}', [EventosController::class, 'buscar']);
 
-Route::resource('entrenamientos', EntrenamientosController::class)->except(['create', 'edit']);
+// 2. Resource después
+Route::resource('eventos', EventosController::class)
+    ->parameters(['eventos' => 'clave'])
+    ->except(['create', 'edit']);
+
+
+// Rutas de Instalaciones (Orden Correcto)
+Route::post('instalaciones/destruir-imagen', [InstalacionesController::class, 'destruirImagen']);
+Route::get('/buscar/instalaciones/{texto}', [InstalacionesController::class, 'buscar']);
+
+Route::resource('instalaciones', InstalacionesController::class)
+    ->parameters(['instalaciones' => 'clave'])
+    ->except(['create', 'edit']);
+
+
+
+// 1. Rutas específicas primero
+Route::post('entrenamientos/destruir-imagen', [EntrenamientosController::class, 'destruirImagen']);
 Route::get('/buscar/entrenamientos/{texto}', [EntrenamientosController::class, 'buscar']);
 
-Route::resource('instalaciones', InstalacionesController::class)->except(['create', 'edit']);
-Route::get('/buscar/instalaciones/{texto}', [InstalacionesController::class, 'buscar']);
+// 2. Resource después
+Route::resource('entrenamientos', EntrenamientosController::class)
+    ->parameters(['entrenamientos' => 'clave'])
+    ->except(['create', 'edit']);
+
+
 
 // ---------- OTROS SERVICIOS ----------
 Route::post('/enviar-correo', [UsuarioController::class, 'enviarCorreo']);
