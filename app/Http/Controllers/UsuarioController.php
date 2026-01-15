@@ -496,31 +496,7 @@ public function obtenerClientesActivosSede(Request $request)
 
 
 
-private function getPublicIdFromUrl($url)
-{
-    // Ejemplo de URL: https://res.cloudinary.com/demo/image/upload/v12345/usuarios/perfiles/identificador.jpg
-    // Esta lógica extrae "usuarios/perfiles/identificador"
-    
-    $path = parse_url($url, PHP_URL_PATH); // Obtiene la ruta después del dominio
-    $parts = explode('/', $path);
-    
-    // Buscamos a partir de la carpeta que definimos (usuarios)
-    $index = array_search('usuarios', $parts);
-    
-    if ($index !== false) {
-        $relevantParts = array_slice($parts, $index);
-        $fileWithExtension = end($relevantParts);
-        $fileName = pathinfo($fileWithExtension, PATHINFO_FILENAME);
-        
-        // Reemplazamos la última parte por el nombre sin extensión
-        array_pop($relevantParts);
-        $relevantParts[] = $fileName;
-        
-        return implode('/', $relevantParts);
-    }
 
-    return null;
-}
 
 public function eliminarUsuarioPermanente($clave)
 {
@@ -530,20 +506,53 @@ public function eliminarUsuarioPermanente($clave)
         return response()->json(['message' => 'Usuario no encontrado'], 404);
     }
 
-    // 1. Limpieza de Foto de Perfil
-    if ($usuario->ruta_imagen) {
-        $this->borrarImagenCloudinary($usuario->ruta_imagen);
+    try {
+        // 1. Borrar Foto de Perfil de Cloudinary
+        if ($usuario->ruta_imagen) {
+            $this->borrarImagenCloudinary($usuario->ruta_imagen);
+        }
+
+        // 2. Borrar QR de Cloudinary (NUEVO)
+        if ($usuario->qr_imagen) {
+            $this->borrarImagenCloudinary($usuario->qr_imagen);
+        }
+
+        // 3. Eliminar el registro de la DB
+        $usuario->delete(); 
+
+        return response()->json(['message' => 'Usuario, foto y QR eliminados permanentemente']);
+    } catch (\Exception $e) {
+        return response()->json([
+            'message' => 'Error al eliminar',
+            'error' => $e->getMessage()
+        ], 500);
     }
-
-    // 2. Limpieza de QR
-    if ($usuario->qr_imagen) {
-        $this->borrarImagenCloudinary($usuario->qr_imagen);
-    }
-
-    $usuario->delete(); 
-
-    return response()->json(['message' => 'Usuario e imágenes eliminados permanentemente']);
 }
+
+private function getPublicIdFromUrl($url)
+{
+    // Esta lógica es más segura para extraer el public_id de Cloudinary
+    // Ejemplo: .../image/upload/v12345/usuarios/qrs/archivo.png -> usuarios/qrs/archivo
+    try {
+        $path = parse_url($url, PHP_URL_PATH);
+        $segments = explode('/', $path);
+        
+        // Buscamos dónde empieza el path real después de 'upload' y la 'versión' (v123...)
+        $uploadIndex = array_search('upload', $segments);
+        if ($uploadIndex !== false) {
+            // Saltamos 'upload' y el siguiente segmento que suele ser la versión (v123456)
+            $relevantSegments = array_slice($segments, $uploadIndex + 2);
+            $publicIdWithExt = implode('/', $relevantSegments);
+            
+            // Quitamos la extensión (.jpg, .png, etc)
+            return preg_replace('/\.[^.]+$/', '', $publicIdWithExt);
+        }
+    } catch (\Exception $e) {
+        return null;
+    }
+    return null;
+}
+
 
 /**
  * Endpoint para borrar solo una imagen (útil cuando se cambia de foto sin borrar al usuario)
