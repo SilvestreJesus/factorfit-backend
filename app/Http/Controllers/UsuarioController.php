@@ -613,13 +613,16 @@ public function obtenerConteosBitacora(Request $request)
     ]);
 }
 
+
 public function contarCambiosHoy(Request $request)
 {
     $sede = $request->query('sede');
     $hoy = now()->format('Y-m-d');
+    
+    // Recibimos cuánto ha visto el usuario desde el Header de Angular
+    $vistos = $request->query('vistos', 0); 
 
-    $total = \App\Models\Usuario::where('sede', $sede)
-        // Excluimos admins para que el badge solo marque actividad de clientes
+    $totalBaseDatos = \App\Models\Usuario::where('sede', $sede)
         ->whereNotIn('rol', ['admin', 'superadmin']) 
         ->where(function($query) use ($hoy) {
             $query->whereDate('created_at', $hoy)
@@ -627,6 +630,11 @@ public function contarCambiosHoy(Request $request)
         })
         ->count();
 
-    return response()->json(['total' => $total]);
+    // El resultado para el badge es el total menos lo que ya se vio
+    $totalFinal = $totalBaseDatos - $vistos;
+
+    return response()->json([
+        'total' => $totalFinal > 0 ? $totalFinal : 0
+    ]);
 }
 }
