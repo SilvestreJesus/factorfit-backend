@@ -42,6 +42,8 @@ Route::prefix('usuarios')->group(function () {
     Route::delete('/{clave_usuario}', [UsuarioController::class, 'destroy']);
     Route::delete('/permanente/{clave}', [UsuarioController::class, 'eliminarUsuarioPermanente']);
     Route::post('/{clave_usuario}/destruir-imagen', [UsuarioController::class, 'destruirImagen']);
+    // routes/api.php
+    Route::delete('/{clave}/eliminar-permanente', [UsuarioController::class, 'eliminarUsuarioPermanente']);
 });
 
 
