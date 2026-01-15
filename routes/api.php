@@ -19,23 +19,31 @@ Route::post('/recuperar-password', [UsuarioController::class, 'recuperarPassword
 Route::put('/usuarios/perfil/{clave}', [UsuarioController::class, 'actualizarPerfil']);
 
 // ---------- USUARIOS ----------
+// ---------- USUARIOS ----------
 Route::prefix('usuarios')->group(function () {
-    Route::get('/', [UsuarioController::class, 'index']);
+    // 1. RUTAS ESTÁTICAS (SIEMPRE PRIMERO)
+    Route::get('/conteos-bitacora', [UsuarioController::class, 'obtenerConteosBitacora']);
+    Route::get('/cambios-hoy', [UsuarioController::class, 'contarCambiosHoy']);
     Route::get('/por-sede', [UsuarioController::class, 'usuariosPorSede']);
     Route::get('/renovacion', [UsuarioController::class, 'usuariosParaRenovacion']);
     Route::get('/obtener-clientes-activos-sede', [UsuarioController::class, 'obtenerClientesActivosSede']);
     Route::get('/buscar/general/{texto}', [UsuarioController::class, 'buscarUsuarios']);
     Route::get('/buscar/sede', [UsuarioController::class, 'buscarUsuariosPorSede']);
-    
+    Route::get('/', [UsuarioController::class, 'index']);
+
+    // 2. RUTAS CON PARÁMETROS (DESPUÉS)
     Route::post('/', [UsuarioController::class, 'store']);
     Route::post('/{clave}/subir-foto', [UsuarioController::class, 'subirFoto']);
     
-    Route::get('/{clave_usuario}', [UsuarioController::class, 'show']);
+    Route::get('/{clave_usuario}', [UsuarioController::class, 'show']); // Esta atrapa todo lo que sigue
     Route::put('/{clave_usuario}', [UsuarioController::class, 'update']);
-    Route::put('/{clave}/eliminar', [UsuarioController::class, 'eliminarUsuario']); // Eliminación lógica (status)
-    Route::delete('/{clave_usuario}', [UsuarioController::class, 'destroy']); // Eliminación física con limpieza Cloudinary
-    Route::delete('/{clave}/eliminar-permanente', [UsuarioController::class, 'eliminarUsuarioPermanente']);
+    Route::put('/{clave}/eliminar', [UsuarioController::class, 'eliminarUsuario']);
+    Route::delete('/{clave_usuario}', [UsuarioController::class, 'destroy']);
+    Route::delete('/permanente/{clave}', [UsuarioController::class, 'eliminarUsuarioPermanente']);
+    Route::post('/{clave_usuario}/destruir-imagen', [UsuarioController::class, 'destruirImagen']);
 });
+
+
 
 // ---------- PAGOS ----------
 Route::get('/pagos/actualizar', [PagoController::class, 'actualizarPagos']);
@@ -45,8 +53,11 @@ Route::resource('pagos', PagoController::class)->except(['create', 'edit']);
 Route::get('/buscar/pagos/{texto}', [PagoController::class, 'buscar']);
 
 // ---------- PERSONAL ----------
-Route::resource('personal', PersonalController::class)->except(['create', 'edit']);
-Route::get('/buscar/personal/{texto}', [PersonalController::class, 'buscar']);
+Route::post('personal/destruir-imagen', [PersonalController::class, 'destruirImagen']);
+Route::resource('personal', PersonalController::class)
+    ->parameters(['personal' => 'clave'])
+    ->except(['create', 'edit']);
+
 
 // ---------- ASISTENCIAS ----------
 Route::post('/asistencias/verificar-rostro', [AsistenciaController::class, 'verificarRostro']);
@@ -56,33 +67,26 @@ Route::resource('asistencias', AsistenciaController::class)->except(['create', '
 
 // ---------- CONTENIDO (EVENTOS, ENTRENAMIENTOS, INSTALACIONES) ----------
 
-// api.php
-
-// 1. Rutas específicas primero
+// EVENTOS
 Route::post('eventos/destruir-imagen', [EventosController::class, 'destruirImagen']);
 Route::get('/buscar/eventos/{texto}', [EventosController::class, 'buscar']);
-
-// 2. Resource después
 Route::resource('eventos', EventosController::class)
     ->parameters(['eventos' => 'clave'])
     ->except(['create', 'edit']);
 
 
-// Rutas de Instalaciones (Orden Correcto)
+// INSTALACIONES
 Route::post('instalaciones/destruir-imagen', [InstalacionesController::class, 'destruirImagen']);
 Route::get('/buscar/instalaciones/{texto}', [InstalacionesController::class, 'buscar']);
-
 Route::resource('instalaciones', InstalacionesController::class)
     ->parameters(['instalaciones' => 'clave'])
     ->except(['create', 'edit']);
 
 
 
-// 1. Rutas específicas primero
+// ENTRENAMIENTOS
 Route::post('entrenamientos/destruir-imagen', [EntrenamientosController::class, 'destruirImagen']);
 Route::get('/buscar/entrenamientos/{texto}', [EntrenamientosController::class, 'buscar']);
-
-// 2. Resource después
 Route::resource('entrenamientos', EntrenamientosController::class)
     ->parameters(['entrenamientos' => 'clave'])
     ->except(['create', 'edit']);

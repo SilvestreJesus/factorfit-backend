@@ -5,14 +5,14 @@ namespace App\Http\Controllers;
 use App\Models\Personal;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-// Importamos Cloudinary para el manejo de imágenes en la nube
+use Illuminate\Support\Facades\Log; 
 use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
 class PersonalController extends Controller
 {
     public function index(Request $request)
     {
-        $query = Personal::query();
+        $query = Personal::latest();
 
         // Filtrar por sede si se pasa como query
         if ($request->has('sede')) {
@@ -38,7 +38,8 @@ class PersonalController extends Controller
             'descripcion' => 'nullable|string',
             'sede' => 'required|string|max:30',
             'rol' => 'nullable|string|max:30',
-            'ruta_imagen' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048'
+            'ruta_imagen' => 'nullable|string' 
+            
         ]);
 
         $validated['rol'] = $validated['rol'] ?? 'personal';
@@ -74,82 +75,81 @@ class PersonalController extends Controller
 
 public function update(Request $request, $clave)
     {
-        $personal = Personal::where('clave_personal', $clave)->firstOrFail();
+        try {
+            $personal = Personal::where('clave_personal', $clave)->firstOrFail();
+            $urlVieja = $personal->ruta_imagen;
+            $urlNueva = $request->input('ruta_imagen');
 
-        $personal->nombre_completo = $request->nombre_completo;
-        $personal->puesto = $request->puesto;
-        $personal->descripcion = $request->descripcion;
-        $personal->sede = $request->sede;
-        $personal->rol = $request->rol ?? 'personal';
+            // Solo intentamos borrar si la URL cambió y no está vacía
+            if (!empty($urlNueva) && $urlNueva !== $urlVieja) {
+                $this->borrarImagenCloudinary($urlVieja);
+            }
 
-        if ($request->hasFile('ruta_imagen')) {
-            // 1. BORRAR FOTO ANTERIOR DE CLOUDINARY PARA NO ACUMULAR BASURA
+            $personal->update($request->only(['nombre_completo', 'puesto', 'descripcion', 'sede', 'ruta_imagen']));
+            return response()->json(['message' => 'Actualizado correctamente']);
+        } catch (\Exception $e) {
+            Log::error("Error en Update personal: " . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function destroy($clave)
+    {
+        try {
+            $personal = Personal::where('clave_personal', $clave)->firstOrFail();
+            
             if ($personal->ruta_imagen) {
-                $publicId = $this->getPublicIdFromUrl($personal->ruta_imagen);
+                $this->borrarImagenCloudinary($personal->ruta_imagen);
+            }
+            
+            $personal->delete();
+            return response()->json(['message' => 'Eliminado correctamente']);
+        } catch (\Exception $e) {
+            Log::error("Error en Destroy personal: " . $e->getMessage());
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    public function destruirImagen(Request $request)
+    {
+        $url = $request->input('url');
+        if ($url && str_contains($url, 'cloudinary.com')) {
+            try {
+                $publicId = $this->getPublicIdFromUrl($url);
+                if ($publicId) {
+                    Cloudinary::destroy($publicId);
+                    return response()->json(['message' => 'Imagen eliminada de la nube']);
+                }
+            } catch (\Exception $e) {
+                Log::warning("No se pudo borrar la imagen en Cloudinary: " . $e->getMessage());
+            }
+        }
+        return response()->json(['message' => 'Proceso completado (con o sin borrado de nube)']);
+    }
+
+    private function borrarImagenCloudinary($url)
+    {
+        try {
+            if ($url && str_contains($url, 'cloudinary.com')) {
+                $publicId = $this->getPublicIdFromUrl($url);
                 if ($publicId) {
                     Cloudinary::destroy($publicId);
                 }
             }
-
-            // 2. SUBIR LA NUEVA
-            $result = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
-                'folder' => 'personal'
-            ]);
-            $personal->ruta_imagen = $result->getSecurePath();
+        } catch (\Exception $e) {
+            Log::error("Falla crítica al borrar en Cloudinary: " . $e->getMessage());
         }
-
-        $personal->save();
-        return response()->json(['message' => 'Personal actualizado correctamente']);
     }
 
-    public function destroy($clave_personal)
-    {
-        $item = Personal::where('clave_personal', $clave_personal)->first();
-
-        if (!$item) {
-            return response()->json(['message' => 'Registro no encontrado'], 404);
-        }
-
-        // ELIMINAR FOTO DE CLOUDINARY
-        if ($item->ruta_imagen) {
-            $publicId = $this->getPublicIdFromUrl($item->ruta_imagen);
-            if ($publicId) {
-                Cloudinary::destroy($publicId);
-            }
-        }
-
-        $item->delete();
-        return response()->json(['message' => 'Personal e imagen eliminados correctamente']);
-    }
-
-    // FUNCIÓN PARA EXTRAER EL ID (Buscando la carpeta 'personal')
     private function getPublicIdFromUrl($url)
     {
-        $path = parse_url($url, PHP_URL_PATH);
-        $parts = explode('/', $path);
-        
-        $index = array_search('personal', $parts);
-        
-        if ($index !== false) {
-            $relevantParts = array_slice($parts, $index);
-            $fileWithExtension = end($relevantParts);
-            $fileName = pathinfo($fileWithExtension, PATHINFO_FILENAME);
-            
-            array_pop($relevantParts);
-            $relevantParts[] = $fileName;
-            
-            return implode('/', $relevantParts);
+        // Esta regex extrae "personal/nombre_archivo" de la URL de Cloudinary
+        if (preg_match('/upload\/v\d+\/(.+)\.[a-z]{3,4}$/i', $url, $matches)) {
+            return $matches[1];
         }
         return null;
     }
 
-    public function buscar(Request $request)
-    {
-        $texto = $request->input('texto', '');
-        $result = Personal::where('nombre_completo', 'LIKE', "%$texto%")
-            ->orWhere('puesto', 'LIKE', "%$texto%")
-            ->get();
 
-        return response()->json($result);
-    }
+
 }

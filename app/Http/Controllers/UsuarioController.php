@@ -501,29 +501,7 @@ public function obtenerClientesActivosSede(Request $request)
     return response()->json($query->get());
 }
 
-public function eliminarUsuarioPermanente($clave)
-{
-    $usuario = Usuario::where('clave_usuario', $clave)->first();
-    
-    if (!$usuario) {
-        return response()->json(['message' => 'Usuario no encontrado'], 404);
-    }
 
-    // ---- NUEVO: LIMPIEZA DE NUBE ANTES DE BORRAR REGISTRO ----
-    if ($usuario->ruta_imagen) {
-        $idFoto = $this->getPublicIdFromUrl($usuario->ruta_imagen);
-        if ($idFoto) Cloudinary::destroy($idFoto);
-    }
-
-    if ($usuario->qr_imagen) {
-        $idQr = $this->getPublicIdFromUrl($usuario->qr_imagen);
-        if ($idQr) Cloudinary::destroy($idQr);
-    }
-
-    $usuario->delete(); 
-
-    return response()->json(['message' => 'Usuario e imágenes eliminados permanentemente']);
-}
 
 
 private function getPublicIdFromUrl($url)
@@ -552,4 +530,103 @@ private function getPublicIdFromUrl($url)
     return null;
 }
 
+public function eliminarUsuarioPermanente($clave)
+{
+    $usuario = Usuario::where('clave_usuario', $clave)->first();
+    
+    if (!$usuario) {
+        return response()->json(['message' => 'Usuario no encontrado'], 404);
+    }
+
+    // 1. Limpieza de Foto de Perfil
+    if ($usuario->ruta_imagen) {
+        $this->borrarImagenCloudinary($usuario->ruta_imagen);
+    }
+
+    // 2. Limpieza de QR
+    if ($usuario->qr_imagen) {
+        $this->borrarImagenCloudinary($usuario->qr_imagen);
+    }
+
+    $usuario->delete(); 
+
+    return response()->json(['message' => 'Usuario e imágenes eliminados permanentemente']);
+}
+
+/**
+ * Endpoint para borrar solo una imagen (útil cuando se cambia de foto sin borrar al usuario)
+ */
+public function destruirImagen(Request $request)
+{
+    $url = $request->input('url');
+    if ($url && str_contains($url, 'cloudinary.com')) {
+        $this->borrarImagenCloudinary($url);
+        return response()->json(['message' => 'Imagen procesada para eliminación']);
+    }
+    return response()->json(['message' => 'URL no válida para Cloudinary'], 400);
+}
+
+/**
+ * Lógica privada para interactuar con el API de Cloudinary
+ */
+private function borrarImagenCloudinary($url)
+{
+    try {
+        $publicId = $this->getPublicIdFromUrl($url);
+        if ($publicId) {
+            Cloudinary::destroy($publicId);
+            \Log::info("Cloudinary: Imagen borrada con ID: " . $publicId);
+        }
+    } catch (\Exception $e) {
+        \Log::error("Falla al borrar en Cloudinary: " . $e->getMessage());
+    }
+}
+
+
+public function obtenerConteosBitacora(Request $request)
+{
+    $sede = $request->query('sede');
+    $hoy = now()->startOfDay();
+
+    // Pagos nuevos (Ingresos)
+    $pagos = \App\Models\Pago::whereHas('usuario', function($q) use ($sede) {
+                    $q->where('sede', $sede);
+                })
+                ->where('created_at', '>=', $hoy)->count();
+
+    // Asistencias nuevas
+    $asistencias = \App\Models\Asistencia::whereHas('usuario', function($q) use ($sede) {
+                        $q->where('sede', $sede);
+                    })
+                    ->where('created_at', '>=', $hoy)->count();
+
+    // Renovaciones (Usuarios actualizados hoy)
+    $renovacion = \App\Models\Usuario::where('sede', $sede)
+                ->where('updated_at', '>=', $hoy)
+                ->count();
+
+    return response()->json([
+        'pagos' => $pagos,
+        'asistencias' => $asistencias,
+        'renovacion' => $renovacion, // Cambiado de 'usuarios' a 'renovacion' para hacer match
+        'total' => $pagos + $asistencias + $renovacion
+    ]);
+}
+
+public function contarCambiosHoy(Request $request)
+{
+    $sede = $request->query('sede');
+    $hoy = now()->format('Y-m-d');
+
+    $total = \App\Models\Usuario::where('sede', $sede)
+        // Excluimos admins para que el badge solo marque actividad de clientes
+        ->whereNotIn('rol', ['admin', 'superadmin']) 
+        ->where(function($query) use ($hoy) {
+            $query->whereDate('created_at', $hoy)
+                  ->orWhereDate('updated_at', $hoy);
+        })
+        ->count();
+
+    return response()->json(['total' => $total]);
+}
 }
