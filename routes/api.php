@@ -36,6 +36,7 @@ Route::prefix('usuarios')->group(function () {
     Route::post('/{clave}/subir-foto', [UsuarioController::class, 'subirFoto']);
     
     Route::get('/usuarios/{clave_usuario}', [UsuarioController::class, 'show']);
+    Route::get('/{clave_usuario}', [UsuarioController::class, 'show']); // Esta atrapa todo lo que sigue
     Route::put('/{clave_usuario}', [UsuarioController::class, 'update']);
     Route::put('/{clave}/eliminar', [UsuarioController::class, 'eliminarUsuario']);
     Route::delete('/{clave_usuario}', [UsuarioController::class, 'destroy']);

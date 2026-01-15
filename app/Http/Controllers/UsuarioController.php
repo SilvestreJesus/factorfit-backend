@@ -43,70 +43,62 @@ class UsuarioController extends Controller
 
 
     // POST /api/usuarios
-    public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'nombres'            => 'required|string|max:40',
-            'apellidos'          => 'required|string|max:40',
-            'fecha_nacimiento'   => 'required|date',
-            'telefono'           => 'required|string|max:15',
-            'email'              => 'required|email|unique:usuarios,email',
-            'password'           => 'required|string|min:6',
-            'sede'               => 'nullable|string|max:30',
-            'status'             => 'nullable|string|max:30',
-            'ruta_imagen'        => 'nullable|string',
-            'qr_imagen'          => 'nullable|string',
-            'rol'                => 'nullable|string|max:30',
-            'peso_inicial'       => 'required|string|max:8'
-        ]);
-        $validated['nombres'] = strtolower($validated['nombres']);
-        $validated['apellidos'] = strtolower($validated['apellidos']);
-        $validated['status'] = $validated['status'] ?? 'sin asignar';
-        $validated['sede']   = $validated['sede'] ?? 'ninguno';
-        $validated['password'] = bcrypt($validated['password']);
+public function store(Request $request)
+{
+    // 1. Validación: Ahora aceptamos qr_imagen como un string (la URL de Cloudinary)
+    $validated = $request->validate([
+        'nombres'            => 'required|string|max:40',
+        'apellidos'          => 'required|string|max:40',
+        'fecha_nacimiento'   => 'required|date',
+        'telefono'           => 'required|string|max:15',
+        'email'              => 'required|email|unique:usuarios,email',
+        'password'           => 'required|string|min:6',
+        'sede'               => 'nullable|string|max:30',
+        'status'             => 'nullable|string|max:30',
+        'ruta_imagen'        => 'nullable|string', // URL enviada desde Angular
+        'qr_imagen'          => 'nullable|string', // URL enviada desde Angular
+        'rol'                => 'nullable|string|max:30',
+        'peso_inicial'       => 'required|string|max:12'
+    ]);
 
-        // 1. SUBIR FOTO DE PERFIL A CLOUDINARY
-        if ($request->hasFile('ruta_imagen')) {
-            $resultFoto = Cloudinary::upload($request->file('ruta_imagen')->getRealPath(), [
-                'folder' => 'usuarios/perfiles'
-            ]);
-            $validated['ruta_imagen'] = $resultFoto->getSecurePath();
-        }
+    $validated['nombres'] = strtolower($validated['nombres']);
+    $validated['apellidos'] = strtolower($validated['apellidos']);
+    $validated['status'] = $validated['status'] ?? 'sin asignar';
+    $validated['sede']   = $validated['sede'] ?? 'ninguno';
+    $validated['password'] = bcrypt($validated['password']);
 
-        $usuario = null;
+    $usuario = null;
 
+    try {
         DB::transaction(function() use (&$usuario, $validated) {
-
+            // Generar Clave de Usuario (CLI001...)
             $lastNumber = DB::table('usuarios')
                 ->selectRaw("MAX(CAST(SUBSTRING(clave_usuario FROM 4) AS INTEGER)) AS max_num")
                 ->value('max_num');
 
             $newNumber = $lastNumber ? $lastNumber + 1 : 1;
-
             $validated['clave_usuario'] = 'CLI' . str_pad($newNumber, 3, '0', STR_PAD_LEFT);
 
+            // Creamos el usuario con las URLs que vienen de Angular
             $usuario = Usuario::create($validated);
         });
-// 2. GENERAR QR CON PHP (ADIÓS PYTHON) Y SUBIR A CLOUDINARY
-        // Creamos el QR en memoria
-        $qrRaw = QrCode::format('png')
-            ->size(300)
-            ->margin(1)
-            ->generate("USUARIO:" . $usuario->clave_usuario);
 
-        // Subimos el archivo binario directamente a Cloudinary
-        $resultQr = Cloudinary::upload("data:image/png;base64," . base64_encode($qrRaw), [
-            'folder' => 'usuarios/qrs'
-        ]);
-
-        // Guardamos la URL de Cloudinary en la base de datos
-        $usuario->qr_imagen = $resultQr->getSecurePath();
-        $usuario->save();
         return response()->json([
-            'message' => 'Usuario registrado, foto y QR guardados en la nube',
+            'message' => 'Usuario registrado con éxito',
             'usuario' => $usuario
         ], 201);
+
+    } catch (\Exception $e) {
+        return response()->json([
+            'message' => 'Error al registrar usuario en la base de datos',
+            'error' => $e->getMessage()
+        ], 500);
     }
+}
+
+
+
+
 
     public function update(Request $request, $clave)
     {
