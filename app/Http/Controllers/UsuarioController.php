@@ -415,12 +415,23 @@ public function enviarCorreo(Request $request)
             // Usamos un bloque try-catch interno para que si un email falla, 
             // no detenga el envío de los demás.
             try {
-                Mail::send('emails.formal', $emailData, function ($message) use ($destinatario, $asunto) {
+                // Cambia esto dentro del Mail::send para enviar la imagen como adjunto real, no como texto
+                Mail::send('emails.formal', $emailData, function ($message) use ($destinatario, $asunto, $imagenBase64) {
                     $message->to($destinatario)->subject($asunto);
+                    
+                    if ($imagenBase64) {
+                        // Extraer los datos puros del base64
+                        $imageData = explode(',', $imagenBase64);
+                        $decodedImage = base64_decode(end($imageData));
+                        
+                        $message->attachData($decodedImage, 'imagen_informativa.png', [
+                            'mime' => 'image/png',
+                        ]);
+                    }
                 });
             } catch (\Exception $e) {
                 \Log::error("Fallo envío individual a {$destinatario}: " . $e->getMessage());
-                continue; // Saltar al siguiente email
+                continue; // <--- Esto hace que el bucle siga y te diga "Enviado" aunque falló
             }
         }
 
