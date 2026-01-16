@@ -383,48 +383,48 @@ public function subirFoto(Request $request, $clave)
 
 public function enviarCorreo(Request $request)
 {
-    ini_set('max_execution_time', 300);
+    // Aumentar tiempo para evitar el error de Railway por timeout
+    ini_set('max_execution_time', 120);
+
     $data = $request->validate([
         'emails'    => 'required|array',
         'emails.*'  => 'email',
         'asunto'    => 'required|string',
         'mensaje'   => 'required|string',
         'sede'      => 'nullable|string',
-        'imagen'    => 'nullable|string', // Base64
+        'imagen'    => 'nullable|string', 
     ]);
 
     try {
         $emails = $data['emails'];
-        
-        // Pre-procesamos la imagen fuera del loop para ahorrar memoria
-        $imageData = null;
-        if (!empty($data['imagen'])) {
-            // Extraer solo los datos base64 eliminando el prefijo "data:image/png;base64,"
-            $image_parts = explode(";base64,", $data['imagen']);
-            if (count($image_parts) > 1) {
-                $imageData = base64_decode($image_parts[1]);
-            }
-        }
+        $base64Image = $data['imagen'] ?? null;
 
         foreach ($emails as $destinatario) {
-            // Pasamos $imageData al closure
-            Mail::send('emails.formal', $data, function ($message) use ($data, $destinatario, $imageData) {
-                $message->to($destinatario)
-                        ->subject($data['asunto']);
+            Mail::send('emails.formal', $data, function ($message) use ($data, $destinatario, $base64Image) {
+                $message->to($destinatario)->subject($data['asunto']);
                 
-                // Si hay imagen, la inyectamos como variable especial para la vista
-                if ($imageData) {
-                    // Generamos el CID que usaremos en el HTML
-                    $cid = $message->embedData($imageData, 'imagen_fitness.png', 'image/png');
-                    // Inyectamos el CID globalmente para este envío
-                    $data['cid_url'] = $cid; 
+                // Si hay imagen base64, la embebemos correctamente
+                if ($base64Image) {
+                    $image_parts = explode(";base64,", $base64Image);
+                    if (count($image_parts) > 1) {
+                        $decodedData = base64_decode($image_parts[1]);
+                        // Esto genera un CID automático que puedes usar en la vista como $message->embedData(...)
+                        $message->embedData($decodedData, 'promo.png', 'image/png');
+                    }
                 }
             });
         }
 
-        return response()->json(['message' => 'Correos enviados con éxito']);
+        return response()->json(['message' => 'Correos enviados con éxito'], 200);
+
     } catch (\Exception $e) {
-        return response()->json(['error' => $e->getMessage()], 500);
+        // Log para que puedas ver el error real en Railway
+        \Log::error("Error enviando correo: " . $e->getMessage());
+        
+        return response()->json([
+            'error' => 'Error de conexión con el servidor de correos',
+            'detalle' => $e->getMessage()
+        ], 500);
     }
 }
 
