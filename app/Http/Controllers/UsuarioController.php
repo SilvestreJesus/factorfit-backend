@@ -381,9 +381,13 @@ public function subirFoto(Request $request, $clave)
 }
 
 
+// ... dentro de tu UsuarioController.php
+
 public function enviarCorreo(Request $request)
 {
-    // 1. Validar
+    // Aumentamos el tiempo de espera por si son muchos correos
+    set_time_limit(120);
+
     $data = $request->validate([
         'emails'    => 'required|array',
         'emails.*'  => 'email',
@@ -393,39 +397,40 @@ public function enviarCorreo(Request $request)
     ]);
 
     try {
-        // 2. Decodificar la imagen UNA SOLA VEZ fuera del bucle
         $imageData = null;
+        // Solo procesamos la imagen si realmente existe y tiene contenido
         if (!empty($data['imagen']) && str_contains($data['imagen'], 'base64,')) {
             $image_parts = explode(";base64,", $data['imagen']);
-            $imageData = base64_decode($image_parts[1]);
+            if(isset($image_parts[1])) {
+                $imageData = base64_decode($image_parts[1]);
+            }
         }
 
         $asunto = $data['asunto'];
         $cuerpo = $data['mensaje'];
 
-        // 3. Enviar correos
         foreach ($data['emails'] as $destinatario) {
             Mail::send('emails.formal', ['mensaje' => $cuerpo], function ($message) use ($destinatario, $asunto, $imageData) {
-                $message->to($destinatario)
-                        ->subject($asunto);
+                $message->to($destinatario)->subject($asunto);
                 
                 if ($imageData) {
-                    $message->attachData($imageData, 'promocion.png', [
-                        'mime' => 'image/png',
-                    ]);
+                    $message->attachData($imageData, 'promocion.png', ['mime' => 'image/png']);
                 }
             });
         }
 
-        return response()->json(['message' => 'Correos enviados con éxito'], 200);
+        return response()->json(['message' => 'Correos enviados con éxito vía Brevo'], 200);
 
     } catch (\Exception $e) {
-        \Log::error("Error SMTP Railway: " . $e->getMessage());
+        \Log::error("Error de envío en Railway: " . $e->getMessage());
         
-        // Devolvemos el error con cabeceras explícitas para evitar el bloqueo CORS en el error
+        // Retornamos el error de forma que Angular lo pueda leer (evita el error de CORS falso)
         return response()->json([
-            'error' => 'Error al enviar: ' . $e->getMessage()
-        ], 500)->header('Access-Control-Allow-Origin', '*');
+            'error' => 'Error en el servidor de correo',
+            'detalle' => $e->getMessage()
+        ], 500)
+        ->header('Access-Control-Allow-Origin', '*')
+        ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
     }
 }
 
@@ -433,42 +438,43 @@ public function recuperarPassword(Request $request)
 {
     $request->validate(['email' => 'required|email']);
 
-    // 1. Buscar si el correo existe
     $usuario = Usuario::where('email', $request->email)->first();
 
     if (!$usuario) {
-        // Por seguridad, a veces es mejor decir que se envió el correo aunque no exista,
-        // pero aquí devolveremos error para tu control interno.
         return response()->json(['message' => 'El correo electrónico no está registrado.'], 404);
     }
 
-    // 2. Generar una contraseña temporal aleatoria (8 caracteres)
+    // Generar contraseña temporal
     $passwordTemporal = str_replace(['/', '+', '='], '', base64_encode(random_bytes(6)));
 
     try {
-        // 3. Actualizar la contraseña en la base de datos (Encriptada)
         $usuario->password = bcrypt($passwordTemporal);
         $usuario->save();
 
-        // 4. Preparar datos para el correo
         $data = [
             'email_destino' => $usuario->email,
             'asunto'        => 'Recuperación de Acceso - Factor Fit',
             'nombres'       => $usuario->nombres,
-            'password'      => $passwordTemporal, // Enviamos la de texto plano al correo
-            'mensaje'       => "Hemos recibido una solicitud para renovar tu contraseña. Tu nueva clave temporal de acceso es: "
+            'password'      => $passwordTemporal,
+            'mensaje'       => "Hemos recibido una solicitud para renovar tu contraseña. Tu nueva clave temporal es: "
         ];
 
-        // Usamos la misma vista 'emails.formal' que ya tienes
+        // Usamos Mail::send (Brevo procesará esto rápido)
         Mail::send('emails.formal_recuperacion', $data, function ($message) use ($data) {
             $message->to($data['email_destino'])
                     ->subject($data['asunto']);
         });
 
-        return response()->json(['message' => 'Se ha enviado una nueva contraseña a tu correo.']);
+        return response()->json(['message' => 'Nueva contraseña enviada con éxito.']);
 
     } catch (\Exception $e) {
-        return response()->json(['error' => 'Error al procesar la recuperación: ' . $e->getMessage()], 500);
+        \Log::error("Error en recuperación: " . $e->getMessage());
+        return response()->json([
+            'error' => 'No se pudo enviar el correo de recuperación',
+            'detalle' => $e->getMessage()
+        ], 500)
+        ->header('Access-Control-Allow-Origin', '*')
+        ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
     }
 }
 
