@@ -381,65 +381,49 @@ public function subirFoto(Request $request, $clave)
 }
 
 
-// ... dentro de tu UsuarioController.php
-
 public function enviarCorreo(Request $request)
 {
-    // Aumentar el tiempo solo para esta ejecución
-    ini_set('max_execution_time', 300); 
-    set_time_limit(300);
-
     $data = $request->validate([
         'emails'    => 'required|array',
         'emails.*'  => 'email',
         'asunto'    => 'required|string',
         'mensaje'   => 'required|string',
-        'imagen'    => 'nullable|string', 
-        'sede'      => 'nullable|string'
+        'sede'      => 'nullable|string',
+        'imagen'    => 'nullable|string', // Base64
     ]);
 
     try {
-        $asunto = $data['asunto'];
-        $cuerpo = $data['mensaje'];
-        $imagenBase64 = $data['imagen'];
-        $sede = $data['sede'] ?? 'General';
-
-        // Preparamos los datos una sola vez
-        $emailData = [
-            'mensaje' => $cuerpo,
-            'imagen'  => $imagenBase64,
-            'sede'    => $sede
-        ];
-
-        foreach ($data['emails'] as $destinatario) {
-            // Usamos un bloque try-catch interno para que si un email falla, 
-            // no detenga el envío de los demás.
-            try {
-                // Cambia esto dentro del Mail::send para enviar la imagen como adjunto real, no como texto
-                Mail::send('emails.formal', $emailData, function ($message) use ($destinatario, $asunto, $imagenBase64) {
-                    $message->to($destinatario)->subject($asunto);
-                    
-                    if ($imagenBase64) {
-                        // Extraer los datos puros del base64
-                        $imageData = explode(',', $imagenBase64);
-                        $decodedImage = base64_decode(end($imageData));
-                        
-                        $message->attachData($decodedImage, 'imagen_informativa.png', [
-                            'mime' => 'image/png',
-                        ]);
-                    }
-                });
-            } catch (\Exception $e) {
-                \Log::error("Fallo envío individual a {$destinatario}: " . $e->getMessage());
-                continue; // <--- Esto hace que el bucle siga y te diga "Enviado" aunque falló
+        $emails = $data['emails'];
+        
+        // Pre-procesamos la imagen fuera del loop para ahorrar memoria
+        $imageData = null;
+        if (!empty($data['imagen'])) {
+            // Extraer solo los datos base64 eliminando el prefijo "data:image/png;base64,"
+            $image_parts = explode(";base64,", $data['imagen']);
+            if (count($image_parts) > 1) {
+                $imageData = base64_decode($image_parts[1]);
             }
         }
 
-        return response()->json(['message' => 'Proceso de envío finalizado'], 200);
+        foreach ($emails as $destinatario) {
+            // Pasamos $imageData al closure
+            Mail::send('emails.formal', $data, function ($message) use ($data, $destinatario, $imageData) {
+                $message->to($destinatario)
+                        ->subject($data['asunto']);
+                
+                // Si hay imagen, la inyectamos como variable especial para la vista
+                if ($imageData) {
+                    // Generamos el CID que usaremos en el HTML
+                    $cid = $message->embedData($imageData, 'imagen_fitness.png', 'image/png');
+                    // Inyectamos el CID globalmente para este envío
+                    $data['cid_url'] = $cid; 
+                }
+            });
+        }
 
+        return response()->json(['message' => 'Correos enviados con éxito']);
     } catch (\Exception $e) {
-        \Log::error("Error general en envío masivo: " . $e->getMessage());
-        return response()->json(['error' => 'Error al procesar el envío masivo'], 500);
+        return response()->json(['error' => $e->getMessage()], 500);
     }
 }
 
@@ -447,43 +431,42 @@ public function recuperarPassword(Request $request)
 {
     $request->validate(['email' => 'required|email']);
 
+    // 1. Buscar si el correo existe
     $usuario = Usuario::where('email', $request->email)->first();
 
     if (!$usuario) {
+        // Por seguridad, a veces es mejor decir que se envió el correo aunque no exista,
+        // pero aquí devolveremos error para tu control interno.
         return response()->json(['message' => 'El correo electrónico no está registrado.'], 404);
     }
 
-    // Generar contraseña temporal
+    // 2. Generar una contraseña temporal aleatoria (8 caracteres)
     $passwordTemporal = str_replace(['/', '+', '='], '', base64_encode(random_bytes(6)));
 
     try {
+        // 3. Actualizar la contraseña en la base de datos (Encriptada)
         $usuario->password = bcrypt($passwordTemporal);
         $usuario->save();
 
+        // 4. Preparar datos para el correo
         $data = [
             'email_destino' => $usuario->email,
             'asunto'        => 'Recuperación de Acceso - Factor Fit',
             'nombres'       => $usuario->nombres,
-            'password'      => $passwordTemporal,
-            'mensaje'       => "Hemos recibido una solicitud para renovar tu contraseña. Tu nueva clave temporal es: "
+            'password'      => $passwordTemporal, // Enviamos la de texto plano al correo
+            'mensaje'       => "Hemos recibido una solicitud para renovar tu contraseña. Tu nueva clave temporal de acceso es: "
         ];
 
-        // Usamos Mail::send (Brevo procesará esto rápido)
+        // Usamos la misma vista 'emails.formal' que ya tienes
         Mail::send('emails.formal_recuperacion', $data, function ($message) use ($data) {
             $message->to($data['email_destino'])
                     ->subject($data['asunto']);
         });
 
-        return response()->json(['message' => 'Nueva contraseña enviada con éxito.']);
+        return response()->json(['message' => 'Se ha enviado una nueva contraseña a tu correo.']);
 
     } catch (\Exception $e) {
-        \Log::error("Error en recuperación: " . $e->getMessage());
-        return response()->json([
-            'error' => 'No se pudo enviar el correo de recuperación',
-            'detalle' => $e->getMessage()
-        ], 500)
-        ->header('Access-Control-Allow-Origin', '*')
-        ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+        return response()->json(['error' => 'Error al procesar la recuperación: ' . $e->getMessage()], 500);
     }
 }
 
