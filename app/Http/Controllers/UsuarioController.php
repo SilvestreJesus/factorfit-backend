@@ -385,8 +385,9 @@ public function subirFoto(Request $request, $clave)
 
 public function enviarCorreo(Request $request)
 {
-    // Aumentamos el tiempo de espera por si son muchos correos
-    set_time_limit(120);
+    // Aumentar el tiempo solo para esta ejecución
+    ini_set('max_execution_time', 300); 
+    set_time_limit(300);
 
     $data = $request->validate([
         'emails'    => 'required|array',
@@ -394,43 +395,40 @@ public function enviarCorreo(Request $request)
         'asunto'    => 'required|string',
         'mensaje'   => 'required|string',
         'imagen'    => 'nullable|string', 
+        'sede'      => 'nullable|string'
     ]);
 
     try {
-        $imageData = null;
-        // Solo procesamos la imagen si realmente existe y tiene contenido
-        if (!empty($data['imagen']) && str_contains($data['imagen'], 'base64,')) {
-            $image_parts = explode(";base64,", $data['imagen']);
-            if(isset($image_parts[1])) {
-                $imageData = base64_decode($image_parts[1]);
+        $asunto = $data['asunto'];
+        $cuerpo = $data['mensaje'];
+        $imagenBase64 = $data['imagen'];
+        $sede = $data['sede'] ?? 'General';
+
+        // Preparamos los datos una sola vez
+        $emailData = [
+            'mensaje' => $cuerpo,
+            'imagen'  => $imagenBase64,
+            'sede'    => $sede
+        ];
+
+        foreach ($data['emails'] as $destinatario) {
+            // Usamos un bloque try-catch interno para que si un email falla, 
+            // no detenga el envío de los demás.
+            try {
+                Mail::send('emails.formal', $emailData, function ($message) use ($destinatario, $asunto) {
+                    $message->to($destinatario)->subject($asunto);
+                });
+            } catch (\Exception $e) {
+                \Log::error("Fallo envío individual a {$destinatario}: " . $e->getMessage());
+                continue; // Saltar al siguiente email
             }
         }
 
-        $asunto = $data['asunto'];
-        $cuerpo = $data['mensaje'];
-
-        foreach ($data['emails'] as $destinatario) {
-            Mail::send('emails.formal', ['mensaje' => $cuerpo], function ($message) use ($destinatario, $asunto, $imageData) {
-                $message->to($destinatario)->subject($asunto);
-                
-                if ($imageData) {
-                    $message->attachData($imageData, 'promocion.png', ['mime' => 'image/png']);
-                }
-            });
-        }
-
-        return response()->json(['message' => 'Correos enviados con éxito vía Brevo'], 200);
+        return response()->json(['message' => 'Proceso de envío finalizado'], 200);
 
     } catch (\Exception $e) {
-        \Log::error("Error de envío en Railway: " . $e->getMessage());
-        
-        // Retornamos el error de forma que Angular lo pueda leer (evita el error de CORS falso)
-        return response()->json([
-            'error' => 'Error en el servidor de correo',
-            'detalle' => $e->getMessage()
-        ], 500)
-        ->header('Access-Control-Allow-Origin', '*')
-        ->header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+        \Log::error("Error general en envío masivo: " . $e->getMessage());
+        return response()->json(['error' => 'Error al procesar el envío masivo'], 500);
     }
 }
 
