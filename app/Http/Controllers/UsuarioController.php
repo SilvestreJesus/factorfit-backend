@@ -383,34 +383,33 @@ public function subirFoto(Request $request, $clave)
 
 public function enviarCorreo(Request $request)
 {
+    // 1. Validar
     $data = $request->validate([
         'emails'    => 'required|array',
         'emails.*'  => 'email',
         'asunto'    => 'required|string',
         'mensaje'   => 'required|string',
-        'imagen'    => 'nullable|string', // Base64
+        'imagen'    => 'nullable|string', 
     ]);
 
     try {
+        // 2. Decodificar la imagen UNA SOLA VEZ fuera del bucle
         $imageData = null;
-        if (!empty($data['imagen'])) {
+        if (!empty($data['imagen']) && str_contains($data['imagen'], 'base64,')) {
             $image_parts = explode(";base64,", $data['imagen']);
-            if (count($image_parts) > 1) {
-                $imageData = base64_decode($image_parts[1]);
-            }
+            $imageData = base64_decode($image_parts[1]);
         }
 
-        // Extraemos los datos para que el closure sea ligero
         $asunto = $data['asunto'];
         $cuerpo = $data['mensaje'];
 
+        // 3. Enviar correos
         foreach ($data['emails'] as $destinatario) {
             Mail::send('emails.formal', ['mensaje' => $cuerpo], function ($message) use ($destinatario, $asunto, $imageData) {
                 $message->to($destinatario)
                         ->subject($asunto);
                 
                 if ($imageData) {
-                    // attachData es mucho más eficiente en memoria que embedData en loops
                     $message->attachData($imageData, 'promocion.png', [
                         'mime' => 'image/png',
                     ]);
@@ -418,11 +417,15 @@ public function enviarCorreo(Request $request)
             });
         }
 
-        return response()->json(['message' => 'Correos enviados con éxito']);
+        return response()->json(['message' => 'Correos enviados con éxito'], 200);
+
     } catch (\Exception $e) {
-        // Logueamos el error real para verlo en Railway Dashboard
         \Log::error("Error SMTP Railway: " . $e->getMessage());
-        return response()->json(['error' => $e->getMessage()], 500);
+        
+        // Devolvemos el error con cabeceras explícitas para evitar el bloqueo CORS en el error
+        return response()->json([
+            'error' => 'Error al enviar: ' . $e->getMessage()
+        ], 500)->header('Access-Control-Allow-Origin', '*');
     }
 }
 
