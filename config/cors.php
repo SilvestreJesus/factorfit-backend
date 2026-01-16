@@ -19,7 +19,10 @@ return [
 
     'allowed_methods' => ['*'],
 
-    'allowed_origins' => ['*'],
+    'allowed_origins' => [
+        'https://factorfit.vercel.app',
+        'http://localhost:4200' 
+    ],
 
     'allowed_origins_patterns' => [],
 

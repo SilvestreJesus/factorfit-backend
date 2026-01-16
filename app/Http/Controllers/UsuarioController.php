@@ -383,6 +383,7 @@ public function subirFoto(Request $request, $clave)
 
 public function enviarCorreo(Request $request)
 {
+    ini_set('max_execution_time', 300);
     $data = $request->validate([
         'emails'    => 'required|array',
         'emails.*'  => 'email',
