@@ -388,41 +388,40 @@ public function enviarCorreo(Request $request)
         'emails.*'  => 'email',
         'asunto'    => 'required|string',
         'mensaje'   => 'required|string',
-        'sede'      => 'nullable|string',
         'imagen'    => 'nullable|string', // Base64
     ]);
 
     try {
-        $emails = $data['emails'];
-        
-        // Pre-procesamos la imagen fuera del loop para ahorrar memoria
         $imageData = null;
         if (!empty($data['imagen'])) {
-            // Extraer solo los datos base64 eliminando el prefijo "data:image/png;base64,"
             $image_parts = explode(";base64,", $data['imagen']);
             if (count($image_parts) > 1) {
                 $imageData = base64_decode($image_parts[1]);
             }
         }
 
-        foreach ($emails as $destinatario) {
-            // Pasamos $imageData al closure
-            Mail::send('emails.formal', $data, function ($message) use ($data, $destinatario, $imageData) {
+        // Extraemos los datos para que el closure sea ligero
+        $asunto = $data['asunto'];
+        $cuerpo = $data['mensaje'];
+
+        foreach ($data['emails'] as $destinatario) {
+            Mail::send('emails.formal', ['mensaje' => $cuerpo], function ($message) use ($destinatario, $asunto, $imageData) {
                 $message->to($destinatario)
-                        ->subject($data['asunto']);
+                        ->subject($asunto);
                 
-                // Si hay imagen, la inyectamos como variable especial para la vista
                 if ($imageData) {
-                    // Generamos el CID que usaremos en el HTML
-                    $cid = $message->embedData($imageData, 'imagen_fitness.png', 'image/png');
-                    // Inyectamos el CID globalmente para este envío
-                    $data['cid_url'] = $cid; 
+                    // attachData es mucho más eficiente en memoria que embedData en loops
+                    $message->attachData($imageData, 'promocion.png', [
+                        'mime' => 'image/png',
+                    ]);
                 }
             });
         }
 
         return response()->json(['message' => 'Correos enviados con éxito']);
     } catch (\Exception $e) {
+        // Logueamos el error real para verlo en Railway Dashboard
+        \Log::error("Error SMTP Railway: " . $e->getMessage());
         return response()->json(['error' => $e->getMessage()], 500);
     }
 }
