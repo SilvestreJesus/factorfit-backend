@@ -416,49 +416,40 @@ public function recuperarPassword(Request $request)
         return response()->json(['message' => 'El correo electrónico no está registrado.'], 404);
     }
 
-    // Generar contraseña temporal
     $passwordTemporal = str_replace(['/', '+', '='], '', base64_encode(random_bytes(6)));
 
     try {
-        // Actualizar en base de datos
         $usuario->password = bcrypt($passwordTemporal);
         $usuario->save();
 
-        // --- AQUÍ ESTÁ EL TRUCO ---
-        // Renderizamos la vista 'emails.formal' (el HTML morado que me pasaste)
-        // Pasamos las variables exactas que pide tu diseño
-        $htmlDisenoPhp = view('emails.formal', [
+        // --- IMPORTANTE: EL NOMBRE DE LA VISTA DEBE SER EXACTO ---
+        // Según tu captura de VS Code, el archivo es 'formal_recuperacion.blade.php'
+        $htmlProcesado = view('emails.formal_recuperacion', [
             'nombres'  => ucwords($usuario->nombres),
             'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal para entrar al sistema:',
             'password' => $passwordTemporal,
-            'sede'     => $usuario->sede ?? 'General'
+            'sede'     => $usuario->sede ?? 'Emiliano'
         ])->render();
 
-        // Enviamos al servidor de Node
-        $urlNode = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
+        $urlCorreos = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
         
-        $response = \Illuminate\Support\Facades\Http::post($urlNode, [
+        $response = \Illuminate\Support\Facades\Http::post($urlCorreos, [
             'emails'      => [$usuario->email],
             'asunto'      => 'Recuperación de Acceso - Factor Fit',
-            'htmlDirecto' => $htmlDisenoPhp, // Aquí va todo tu código HTML de PHP
-            'tipo'        => 'html_puro'    // Esto le dice a Node: "No uses tu plantilla, usa la mía"
+            'htmlDirecto' => $htmlProcesado, // Enviamos tu diseño morado
+            'tipo'        => 'html_puro'    // Usamos 'html_puro' para que Node NO meta su diseño
         ]);
 
         if ($response->successful()) {
             return response()->json(['message' => 'Se ha enviado una nueva contraseña a tu correo.']);
-        } else {
-            // Si Node falla, lanzamos el error para saber qué pasó
-            return response()->json([
-                'error' => 'Node rechazó el envío',
-                'detalle' => $response->body()
-            ], 502);
-        }
+        } 
+        
+        return response()->json(['error' => 'Error al enviar el correo vía Node'], 500);
 
     } catch (\Exception $e) {
-        return response()->json(['error' => 'Error en el servidor: ' . $e->getMessage()], 500);
+        return response()->json(['error' => 'Error: ' . $e->getMessage()], 500);
     }
 }
-
 
 public function obtenerClientesActivosSede(Request $request)
 {
