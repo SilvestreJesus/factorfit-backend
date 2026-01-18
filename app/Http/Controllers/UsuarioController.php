@@ -416,38 +416,46 @@ public function recuperarPassword(Request $request)
         return response()->json(['message' => 'El correo electrónico no está registrado.'], 404);
     }
 
+    // Generar contraseña temporal
     $passwordTemporal = str_replace(['/', '+', '='], '', base64_encode(random_bytes(6)));
 
     try {
+        // Actualizar en base de datos
         $usuario->password = bcrypt($passwordTemporal);
         $usuario->save();
 
-        // RENDERIZAR LA VISTA PHP (Usa el nombre exacto de tu archivo en resources/views)
-        $htmlDirecto = view('emails.formal', [
+        // --- AQUÍ ESTÁ EL TRUCO ---
+        // Renderizamos la vista 'emails.formal' (el HTML morado que me pasaste)
+        // Pasamos las variables exactas que pide tu diseño
+        $htmlDisenoPhp = view('emails.formal', [
             'nombres'  => ucwords($usuario->nombres),
-            'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal:',
+            'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal para entrar al sistema:',
             'password' => $passwordTemporal,
             'sede'     => $usuario->sede ?? 'General'
         ])->render();
 
-        // ENVIAR AL NODE DESDE EL SERVIDOR
+        // Enviamos al servidor de Node
         $urlNode = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
         
         $response = \Illuminate\Support\Facades\Http::post($urlNode, [
             'emails'      => [$usuario->email],
             'asunto'      => 'Recuperación de Acceso - Factor Fit',
-            'htmlDirecto' => $htmlDirecto, // MANDAMOS EL DISEÑO PHP
-            'tipo'        => 'html_puro'
+            'htmlDirecto' => $htmlDisenoPhp, // Aquí va todo tu código HTML de PHP
+            'tipo'        => 'html_puro'    // Esto le dice a Node: "No uses tu plantilla, usa la mía"
         ]);
 
         if ($response->successful()) {
-            return response()->json(['message' => 'Correo enviado con éxito']);
-        } 
-        
-        return response()->json(['message' => 'Error al contactar con el servicio de correos'], 502);
+            return response()->json(['message' => 'Se ha enviado una nueva contraseña a tu correo.']);
+        } else {
+            // Si Node falla, lanzamos el error para saber qué pasó
+            return response()->json([
+                'error' => 'Node rechazó el envío',
+                'detalle' => $response->body()
+            ], 502);
+        }
 
     } catch (\Exception $e) {
-        return response()->json(['message' => 'Error interno: ' . $e->getMessage()], 500);
+        return response()->json(['error' => 'Error en el servidor: ' . $e->getMessage()], 500);
     }
 }
 
