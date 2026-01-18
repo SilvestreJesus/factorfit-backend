@@ -10,6 +10,6 @@
             <span style="font-size: 24px; font-weight: bold; color: #7c3aed; letter-spacing: 2px;">{{ $password }}</span>
         </div>
         <p style="font-size: 14px; color: #6b7280;">Te recomendamos iniciar sesión y cambiar esta contraseña desde tu perfil inmediatamente por motivos de seguridad.</p>
-        <a href="https://tudominio.com/auth/login" style="display: inline-block; background: #7c3aed; color: white; padding: 15px 30px; text-decoration: none; border-radius: 12px; font-weight: bold; margin-top: 20px;">Ir al Login</a>
+        <a href="https://factorfit.vercel.app/#/login/login" style="display: inline-block; background: #7c3aed; color: white; padding: 15px 30px; text-decoration: none; border-radius: 12px; font-weight: bold; margin-top: 20px;">Ir al Login</a>
     </div>
 </div>

@@ -410,31 +410,33 @@ public function enviarCorreo(Request $request)
 public function recuperarPassword(Request $request)
 {
     $request->validate(['email' => 'required|email']);
-
     $usuario = Usuario::where('email', $request->email)->first();
 
     if (!$usuario) {
         return response()->json(['message' => 'El correo electrónico no está registrado.'], 404);
     }
 
-    // Generar contraseña temporal
     $passwordTemporal = str_replace(['/', '+', '='], '', base64_encode(random_bytes(6)));
 
     try {
         $usuario->password = bcrypt($passwordTemporal);
         $usuario->save();
 
-        // LLAMADA AL SERVIDOR DE RAILWAY (NODE.JS)
+        // --- CLAVE: RENDERIZAR EL HTML DE PHP ---
+        // Esto convierte tu archivo .blade.php en un string de HTML puro
+        $htmlProcesado = view('emails.password_recovery', [
+            'nombres'  => ucwords($usuario->nombres),
+            'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal para entrar al sistema:',
+            'password' => $passwordTemporal
+        ])->render();
+
         $urlCorreos = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
         
         $response = \Illuminate\Support\Facades\Http::post($urlCorreos, [
-            'emails'   => [$usuario->email],
-            'asunto'   => 'Recuperación de Acceso - Factor Fit',
-            'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal para entrar al sistema:',
-            'nombres'  => ucwords($usuario->nombres), // Capitaliza el nombre
-            'password' => $passwordTemporal,        // Envía la clave generada
-            'tipo'     => 'password',               // Activa la plantilla morada
-            'sede'     => $usuario->sede ?? 'General'
+            'emails'      => [$usuario->email],
+            'asunto'      => 'Recuperación de Acceso - Factor Fit',
+            'htmlDirecto' => $htmlProcesado, // Enviamos el HTML ya diseñado en PHP
+            'tipo'        => 'directo'      // Nueva bandera para Node
         ]);
 
         if ($response->successful()) {
