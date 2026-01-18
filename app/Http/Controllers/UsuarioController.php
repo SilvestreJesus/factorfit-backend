@@ -11,6 +11,9 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Mail;
 use CloudinaryLabs\CloudinaryLaravel\Facades\Cloudinary;
 
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\View;
+
 class UsuarioController extends Controller
 {
     public function index(Request $request)
@@ -381,71 +384,62 @@ public function subirFoto(Request $request, $clave)
 }
 
 
-public function enviarCorreo(Request $request)
-{
-    $data = $request->validate([
-        'emails'    => 'required|array',
-        'asunto'    => 'required|string',
-        'mensaje'   => 'required|string',
-        'sede'      => 'nullable|string',
-        'imagen'    => 'nullable|string', 
-    ]);
-
-    try {
-        $emails = $data['emails'];
-
-        foreach ($emails as $destinatario) {
-            // Pasamos $data a la vista
-            Mail::send('emails.formal', $data, function ($message) use ($data, $destinatario) {
-                $message->to($destinatario)->subject($data['asunto']);
-            });
-        }
-
-        return response()->json(['message' => 'Correos enviados con éxito'], 200);
-    } catch (\Exception $e) {
-        return response()->json(['error' => $e->getMessage()], 500);
-    }
-}
 
 public function recuperarPassword(Request $request)
 {
     $request->validate(['email' => 'required|email']);
-
     $usuario = Usuario::where('email', $request->email)->first();
 
     if (!$usuario) {
-        return response()->json(['message' => 'El correo electrónico no está registrado.'], 404);
+        return response()->json(['message' => 'El correo no existe.'], 404);
     }
 
-    // Generar contraseña temporal
     $passwordTemporal = str_replace(['/', '+', '='], '', base64_encode(random_bytes(6)));
+    $usuario->password = bcrypt($passwordTemporal);
+    $usuario->save();
 
-    try {
-        $usuario->password = bcrypt($passwordTemporal);
-        $usuario->save();
+    // Renderizamos la plantilla Blade a un String de HTML
+    $html = View::make('emails.formal_recuperacion', [
+        'nombres'  => ucwords($usuario->nombres),
+        'password' => $passwordTemporal,
+        'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña.'
+    ])->render();
 
-        // LLAMADA AL SERVIDOR DE RAILWAY (NODE.JS)
-        $urlCorreos = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
-        
-        $response = \Illuminate\Support\Facades\Http::post($urlCorreos, [
-            'emails'   => [$usuario->email],
-            'asunto'   => 'Recuperación de Acceso - Factor Fit',
-            'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal para entrar al sistema:',
-            'nombres'  => ucwords($usuario->nombres), // Capitaliza el nombre
-            'password' => $passwordTemporal,        // Envía la clave generada
-            'tipo'     => 'password',               // Activa la plantilla morada
-            'sede'     => $usuario->sede ?? 'General'
-        ]);
+    // Enviamos el HTML al servicio de Node
+    $response = Http::post('https://corrreoservicio-production.up.railway.app/enviar-correo', [
+        'emails'      => [$usuario->email],
+        'asunto'      => 'Recuperación de Acceso - Factor Fit',
+        'htmlContent' => $html
+    ]);
 
-        if ($response->successful()) {
-            return response()->json(['message' => 'Se ha enviado una nueva contraseña a tu correo.']);
-        } else {
-            return response()->json(['error' => 'Error al enviar el correo vía Railway'], 500);
-        }
+    return response()->json(['message' => 'Contraseña enviada con éxito']);
+}
 
-    } catch (\Exception $e) {
-        return response()->json(['error' => 'Error: ' . $e->getMessage()], 500);
-    }
+public function enviarCorreo(Request $request)
+{
+    $data = $request->validate([
+        'emails'  => 'required|array',
+        'asunto'  => 'required|string',
+        'mensaje' => 'required|string',
+        'sede'    => 'nullable|string',
+        'imagen'  => 'nullable|string', 
+    ]);
+
+    // Renderizamos la plantilla informativa
+    $html = View::make('emails.formal', [
+        'mensaje' => $data['mensaje'],
+        'sede'    => $data['sede'] ?? 'General',
+        'imagen'  => $data['imagen']
+    ])->render();
+
+    $response = Http::post('https://corrreoservicio-production.up.railway.app/enviar-correo', [
+        'emails'      => $data['emails'],
+        'asunto'      => $data['asunto'],
+        'htmlContent' => $html,
+        'imagen'      => $data['imagen'] // Se envía para el adjunto CID
+    ]);
+
+    return response()->json(['message' => 'Correo masivo enviado']);
 }
 
 
