@@ -380,28 +380,41 @@ public function subirFoto(Request $request, $clave)
     ]);
 }
 
-
 public function enviarCorreo(Request $request)
 {
     $data = $request->validate([
-        'emails'    => 'required|array',
-        'asunto'    => 'required|string',
-        'mensaje'   => 'required|string',
-        'sede'      => 'nullable|string',
-        'imagen'    => 'nullable|string', 
+        'emails'  => 'required|array',
+        'asunto'  => 'required|string',
+        'mensaje' => 'required|string',
+        'sede'    => 'nullable|string',
+        'imagen'  => 'nullable|string', // Base64 de la imagen
     ]);
 
     try {
-        $emails = $data['emails'];
+        // 1. Generar el HTML usando la vista Blade
+        // Esto procesa los estilos y el contenido en una sola cadena de texto
+        $htmlFinal = view('emails.formal', [
+            'mensaje' => $data['mensaje'],
+            'sede'    => $data['sede'] ?? 'General',
+            'imagen'  => $data['imagen']
+        ])->render();
 
-        foreach ($emails as $destinatario) {
-            // Pasamos $data a la vista
-            Mail::send('emails.formal', $data, function ($message) use ($data, $destinatario) {
-                $message->to($destinatario)->subject($data['asunto']);
-            });
+        // 2. Enviar la petición al servidor de Node.js en Railway
+        $urlCorreos = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
+        
+        $response = \Illuminate\Support\Facades\Http::post($urlCorreos, [
+            'emails'      => $data['emails'],
+            'asunto'      => $data['asunto'],
+            'htmlContent' => $htmlFinal, // Enviamos el HTML ya diseñado
+            'imagen'      => $data['imagen']  // Se envía para que Node lo adjunte como CID
+        ]);
+
+        if ($response->successful()) {
+            return response()->json(['message' => 'Correos enviados con éxito vía Railway'], 200);
         }
 
-        return response()->json(['message' => 'Correos enviados con éxito'], 200);
+        return response()->json(['error' => 'El servidor de correos respondió con error'], 500);
+
     } catch (\Exception $e) {
         return response()->json(['error' => $e->getMessage()], 500);
     }
@@ -410,44 +423,45 @@ public function enviarCorreo(Request $request)
 public function recuperarPassword(Request $request)
 {
     $request->validate(['email' => 'required|email']);
-
     $usuario = Usuario::where('email', $request->email)->first();
 
     if (!$usuario) {
         return response()->json(['message' => 'El correo electrónico no está registrado.'], 404);
     }
 
-    // Generar contraseña temporal
     $passwordTemporal = str_replace(['/', '+', '='], '', base64_encode(random_bytes(6)));
 
     try {
         $usuario->password = bcrypt($passwordTemporal);
         $usuario->save();
 
-        // LLAMADA AL SERVIDOR DE RAILWAY (NODE.JS)
+        // 1. GENERAR EL HTML DESDE BLADE
+        // Asegúrate de tener una vista en resources/views/emails/recuperacion.blade.php
+        $htmlFinal = view('emails.recuperacion', [
+            'nombres' => ucwords($usuario->nombres),
+            'password' => $passwordTemporal,
+            'mensaje' => 'Hemos recibido una solicitud para renovar tu contraseña.'
+        ])->render();
+
+        // 2. ENVIAR AL NODO
         $urlCorreos = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
         
         $response = \Illuminate\Support\Facades\Http::post($urlCorreos, [
-            'emails'   => [$usuario->email],
-            'asunto'   => 'Recuperación de Acceso - Factor Fit',
-            'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal para entrar al sistema:',
-            'nombres'  => ucwords($usuario->nombres), // Capitaliza el nombre
-            'password' => $passwordTemporal,        // Envía la clave generada
-            'tipo'     => 'password',               // Activa la plantilla morada
-            'sede'     => $usuario->sede ?? 'General'
+            'emails'      => [$usuario->email],
+            'asunto'      => 'Recuperación de Acceso - Factor Fit',
+            'htmlContent' => $htmlFinal // Enviamos el HTML completo
         ]);
 
         if ($response->successful()) {
             return response()->json(['message' => 'Se ha enviado una nueva contraseña a tu correo.']);
         } else {
-            return response()->json(['error' => 'Error al enviar el correo vía Railway'], 500);
+            return response()->json(['error' => 'Error al conectar con el servicio de correos'], 500);
         }
 
     } catch (\Exception $e) {
         return response()->json(['error' => 'Error: ' . $e->getMessage()], 500);
     }
 }
-
 
 public function obtenerClientesActivosSede(Request $request)
 {
