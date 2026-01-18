@@ -383,12 +383,8 @@ public function subirFoto(Request $request, $clave)
 
 public function enviarCorreo(Request $request)
 {
-    // Aumentar tiempo para evitar el error de Railway por timeout
-    ini_set('max_execution_time', 120);
-
     $data = $request->validate([
         'emails'    => 'required|array',
-        'emails.*'  => 'email',
         'asunto'    => 'required|string',
         'mensaje'   => 'required|string',
         'sede'      => 'nullable|string',
@@ -397,34 +393,17 @@ public function enviarCorreo(Request $request)
 
     try {
         $emails = $data['emails'];
-        $base64Image = $data['imagen'] ?? null;
 
         foreach ($emails as $destinatario) {
-            Mail::send('emails.formal', $data, function ($message) use ($data, $destinatario, $base64Image) {
+            // Pasamos $data a la vista
+            Mail::send('emails.formal', $data, function ($message) use ($data, $destinatario) {
                 $message->to($destinatario)->subject($data['asunto']);
-                
-                // Si hay imagen base64, la embebemos correctamente
-                if ($base64Image) {
-                    $image_parts = explode(";base64,", $base64Image);
-                    if (count($image_parts) > 1) {
-                        $decodedData = base64_decode($image_parts[1]);
-                        // Esto genera un CID automático que puedes usar en la vista como $message->embedData(...)
-                        $message->embedData($decodedData, 'promo.png', 'image/png');
-                    }
-                }
             });
         }
 
         return response()->json(['message' => 'Correos enviados con éxito'], 200);
-
     } catch (\Exception $e) {
-        // Log para que puedas ver el error real en Railway
-        \Log::error("Error enviando correo: " . $e->getMessage());
-        
-        return response()->json([
-            'error' => 'Error de conexión con el servidor de correos',
-            'detalle' => $e->getMessage()
-        ], 500);
+        return response()->json(['error' => $e->getMessage()], 500);
     }
 }
 
@@ -432,42 +411,45 @@ public function recuperarPassword(Request $request)
 {
     $request->validate(['email' => 'required|email']);
 
-    // 1. Buscar si el correo existe
     $usuario = Usuario::where('email', $request->email)->first();
 
     if (!$usuario) {
-        // Por seguridad, a veces es mejor decir que se envió el correo aunque no exista,
-        // pero aquí devolveremos error para tu control interno.
         return response()->json(['message' => 'El correo electrónico no está registrado.'], 404);
     }
 
-    // 2. Generar una contraseña temporal aleatoria (8 caracteres)
+    // 1. Generar contraseña temporal
     $passwordTemporal = str_replace(['/', '+', '='], '', base64_encode(random_bytes(6)));
 
     try {
-        // 3. Actualizar la contraseña en la base de datos (Encriptada)
+        // 2. Actualizar en DB
         $usuario->password = bcrypt($passwordTemporal);
         $usuario->save();
 
-        // 4. Preparar datos para el correo
-        $data = [
-            'email_destino' => $usuario->email,
-            'asunto'        => 'Recuperación de Acceso - Factor Fit',
-            'nombres'       => $usuario->nombres,
-            'password'      => $passwordTemporal, // Enviamos la de texto plano al correo
-            'mensaje'       => "Hemos recibido una solicitud para renovar tu contraseña. Tu nueva clave temporal de acceso es: "
+        // 3. PREPARAR PETICIÓN AL SERVIDOR DE NODE (RAILWAY)
+        // En lugar de usar Mail::send de Laravel, llamamos a tu API de correos
+        $urlCorreos = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
+        
+        $payload = [
+            'emails'   => [$usuario->email],
+            'asunto'   => 'Recuperación de Acceso - Factor Fit',
+            'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal para entrar al sistema:',
+            'nombres'  => $usuario->nombres,
+            'password' => $passwordTemporal,
+            'tipo'     => 'password', // Esto activa la plantilla de contraseña en Node
+            'sede'     => $usuario->sede ?? 'General'
         ];
 
-        // Usamos la misma vista 'emails.formal' que ya tienes
-        Mail::send('emails.formal_recuperacion', $data, function ($message) use ($data) {
-            $message->to($data['email_destino'])
-                    ->subject($data['asunto']);
-        });
+        // Usamos HTTP Client de Laravel (asegúrate de tener: use Illuminate\Support\Facades\Http;)
+        $response = \Illuminate\Support\Facades\Http::post($urlCorreos, $payload);
 
-        return response()->json(['message' => 'Se ha enviado una nueva contraseña a tu correo.']);
+        if ($response->successful()) {
+            return response()->json(['message' => 'Se ha enviado una nueva contraseña a tu correo.']);
+        } else {
+            throw new \Exception("Error en el servidor de correos: " . $response->body());
+        }
 
     } catch (\Exception $e) {
-        return response()->json(['error' => 'Error al procesar la recuperación: ' . $e->getMessage()], 500);
+        return response()->json(['error' => 'Error al procesar: ' . $e->getMessage()], 500);
     }
 }
 
