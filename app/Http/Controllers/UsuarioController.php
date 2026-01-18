@@ -417,39 +417,34 @@ public function recuperarPassword(Request $request)
         return response()->json(['message' => 'El correo electrónico no está registrado.'], 404);
     }
 
-    // 1. Generar contraseña temporal
+    // Generar contraseña temporal
     $passwordTemporal = str_replace(['/', '+', '='], '', base64_encode(random_bytes(6)));
 
     try {
-        // 2. Actualizar en DB
         $usuario->password = bcrypt($passwordTemporal);
         $usuario->save();
 
-        // 3. PREPARAR PETICIÓN AL SERVIDOR DE NODE (RAILWAY)
-        // En lugar de usar Mail::send de Laravel, llamamos a tu API de correos
+        // LLAMADA AL SERVIDOR DE RAILWAY (NODE.JS)
         $urlCorreos = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
         
-        $payload = [
+        $response = \Illuminate\Support\Facades\Http::post($urlCorreos, [
             'emails'   => [$usuario->email],
             'asunto'   => 'Recuperación de Acceso - Factor Fit',
             'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal para entrar al sistema:',
-            'nombres'  => $usuario->nombres,
-            'password' => $passwordTemporal,
-            'tipo'     => 'password', // Esto activa la plantilla de contraseña en Node
+            'nombres'  => ucwords($usuario->nombres), // Capitaliza el nombre
+            'password' => $passwordTemporal,        // Envía la clave generada
+            'tipo'     => 'password',               // Activa la plantilla morada
             'sede'     => $usuario->sede ?? 'General'
-        ];
-
-        // Usamos HTTP Client de Laravel (asegúrate de tener: use Illuminate\Support\Facades\Http;)
-        $response = \Illuminate\Support\Facades\Http::post($urlCorreos, $payload);
+        ]);
 
         if ($response->successful()) {
             return response()->json(['message' => 'Se ha enviado una nueva contraseña a tu correo.']);
         } else {
-            throw new \Exception("Error en el servidor de correos: " . $response->body());
+            return response()->json(['error' => 'Error al enviar el correo vía Railway'], 500);
         }
 
     } catch (\Exception $e) {
-        return response()->json(['error' => 'Error al procesar: ' . $e->getMessage()], 500);
+        return response()->json(['error' => 'Error: ' . $e->getMessage()], 500);
     }
 }
 
