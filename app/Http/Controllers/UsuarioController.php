@@ -422,31 +422,32 @@ public function recuperarPassword(Request $request)
         $usuario->password = bcrypt($passwordTemporal);
         $usuario->save();
 
-        // --- CLAVE: RENDERIZAR EL HTML DE PHP ---
-        // Esto convierte tu archivo .blade.php en un string de HTML puro
-        $htmlProcesado = view('emails.password_recovery', [
+        // RENDERIZAR LA VISTA PHP (Usa el nombre exacto de tu archivo en resources/views)
+        $htmlDirecto = view('emails.formal', [
             'nombres'  => ucwords($usuario->nombres),
-            'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal para entrar al sistema:',
-            'password' => $passwordTemporal
+            'mensaje'  => 'Hemos recibido una solicitud para renovar tu contraseña. Usa la siguiente clave temporal:',
+            'password' => $passwordTemporal,
+            'sede'     => $usuario->sede ?? 'General'
         ])->render();
 
-        $urlCorreos = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
+        // ENVIAR AL NODE DESDE EL SERVIDOR
+        $urlNode = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
         
-        $response = \Illuminate\Support\Facades\Http::post($urlCorreos, [
+        $response = \Illuminate\Support\Facades\Http::post($urlNode, [
             'emails'      => [$usuario->email],
             'asunto'      => 'Recuperación de Acceso - Factor Fit',
-            'htmlDirecto' => $htmlProcesado, // Enviamos el HTML ya diseñado en PHP
-            'tipo'        => 'directo'      // Nueva bandera para Node
+            'htmlDirecto' => $htmlDirecto, // MANDAMOS EL DISEÑO PHP
+            'tipo'        => 'html_puro'
         ]);
 
         if ($response->successful()) {
-            return response()->json(['message' => 'Se ha enviado una nueva contraseña a tu correo.']);
-        } else {
-            return response()->json(['error' => 'Error al enviar el correo vía Railway'], 500);
-        }
+            return response()->json(['message' => 'Correo enviado con éxito']);
+        } 
+        
+        return response()->json(['message' => 'Error al contactar con el servicio de correos'], 502);
 
     } catch (\Exception $e) {
-        return response()->json(['error' => 'Error: ' . $e->getMessage()], 500);
+        return response()->json(['message' => 'Error interno: ' . $e->getMessage()], 500);
     }
 }
 
