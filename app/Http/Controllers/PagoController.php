@@ -246,14 +246,14 @@ public function bitacora(Request $request)
             return [
                 'clave'           => $pago->clave_cliente,
                 'nombre'          => ($pago->usuario->nombres ?? 'Sin nombre') . ' ' . ($pago->usuario->apellidos ?? ''),
+                'email'           => $pago->usuario->email ?? '', // <--- AGREGA ESTA LÍNEA
+                'telefono'        => $pago->usuario->telefono ?? '', // <--- AGREGA ESTA LÍNEA (para WhatsApp)
                 'tipo_pago'       => $pago->Tipo_pago,
                 'monto'           => $pago->monto_pagado,
                 'status'          => $pago->usuario->status ?? 'inactivo',
                 'updated_at'      => $pago->updated_at,
                 'monto_pendiente' => $pago->monto_pendiente, 
                 'monto_recargo'   => $pago->monto_recargo,
-                'telefono'        => $pago->usuario->telefono ?? '',
-                'correo'          => $pago->usuario->correo ?? '',
                 'fecha_corte'     => $pago->fecha_corte,
                 // Aseguramos que la sede se devuelva para el filtro del front
                 'sede'            => $pago->usuario->sede ?? 'N/A' 
