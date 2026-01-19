@@ -253,6 +253,7 @@ public function bitacora(Request $request)
                 'monto_pendiente' => $pago->monto_pendiente, 
                 'monto_recargo'   => $pago->monto_recargo,
                 'telefono'        => $pago->usuario->telefono ?? '',
+                'correo'          => $pago->usuario->correo ?? '',
                 'fecha_corte'     => $pago->fecha_corte,
                 // Aseguramos que la sede se devuelva para el filtro del front
                 'sede'            => $pago->usuario->sede ?? 'N/A' 
