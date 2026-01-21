@@ -16,84 +16,82 @@ class AsistenciaController extends Controller
      * Obtener todas las asistencias con la información del usuario
      */
 
-public function index(Request $request)
-{
-    try {
-        $sede = $request->query('sede'); // Recibimos la sede del frontend
+// 1. MÉTODO INDEX CORREGIDO (Para que el gráfico muestre Miercoles)
+    public function index(Request $request)
+    {
+        try {
+            $sede = $request->query('sede');
+            $zonaHoraria = 'America/Mexico_City';
+            $hoy = Carbon::now($zonaHoraria);
 
-        // 1. Obtener registros filtrados por sede a través de la relación 'usuario'
-        $query = Asistencia::with(['usuario.pago'])
-            ->whereHas('usuario', function($q) use ($sede) {
-                if ($sede && $sede !== 'ninguno') {
-                    $q->where('sede', $sede);
-                }
-                // Excluimos usuarios eliminados para que no ensucien la estadística
-                $q->where('status', '!=', 'eliminado');
-            });
-
-        $registros = $query->orderBy('fecha_diario', 'desc')->get();
-
-        // 2. PROCESADO PARA LA TABLA
-        $asistenciasProcesadas = $registros->unique(function ($item) {
-                return $item->clave_cliente . Carbon::parse($item->fecha_diario)->toDateString();
-            })
-            ->map(function($a) {
-                $usuario = $a->usuario;
-                $pago = $usuario->pago;
-                $fecha = Carbon::parse($a->fecha_diario);
-
-                $dias = [
-                    'Monday'=>'Lunes', 'Tuesday'=>'Martes', 'Wednesday'=>'Miércoles',
-                    'Thursday'=>'Jueves', 'Friday'=>'Viernes', 'Saturday'=>'Sábado', 'Sunday'=>'Domingo'
-                ];
-
-                return [
-                    'id'            => $a->id,
-                    'nombres'       => $usuario->nombres,
-                    'apellidos'     => $usuario->apellidos,
-                    'clave_usuario' => $a->clave_cliente,
-                    'status'        => $usuario->status,
-                    'telefono'      => $usuario->telefono,
-                    'fecha_diario'  => $a->fecha_diario, 
-                    'fecha_corte'   => $pago ? $pago->fecha_corte : null,
-                    'dia_nombre'    => $dias[$fecha->format('l')] ?? $fecha->format('l')
-                ];
-            });
-
-        // 3. CÁLCULO DE STATS FILTRADOS POR SEDE
-        $stats = [];
-        $diasIngles = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-        $diasEspanol = ['LUN', 'MAR', 'MIE', 'JUE', 'VIE'];
-        $inicioSemana = Carbon::now()->startOfWeek(Carbon::MONDAY);
-
-        foreach ($diasIngles as $index => $diaNombre) {
-            $fechaDia = $inicioSemana->copy()->addDays($index);
-            
-            // Contamos asistencias de usuarios que pertenezcan a la sede
-            $conteo = Asistencia::whereDate('fecha_diario', $fechaDia->toDateString())
+            $query = Asistencia::with(['usuario.pago'])
                 ->whereHas('usuario', function($q) use ($sede) {
                     if ($sede && $sede !== 'ninguno') {
                         $q->where('sede', $sede);
                     }
+                    $q->where('status', '!=', 'eliminado');
+                });
+
+            $registros = $query->orderBy('fecha_diario', 'desc')->get();
+
+            $asistenciasProcesadas = $registros->unique(function ($item) {
+                    return $item->clave_cliente . Carbon::parse($item->fecha_diario)->toDateString();
                 })
-                ->count();
+                ->map(function($a) {
+                    $usuario = $a->usuario;
+                    $fecha = Carbon::parse($a->fecha_diario);
+                    $dias = [
+                        'Monday'=>'Lunes', 'Tuesday'=>'Martes', 'Wednesday'=>'Miércoles',
+                        'Thursday'=>'Jueves', 'Friday'=>'Viernes', 'Saturday'=>'Sábado', 'Sunday'=>'Domingo'
+                    ];
 
-            $stats[] = [
-                'dia'   => $diasEspanol[$index],
-                'valor' => $conteo
-            ];
+                    return [
+                        'id'            => $a->id,
+                        'nombres'       => $usuario->nombres,
+                        'apellidos'     => $usuario->apellidos,
+                        'clave_usuario' => $a->clave_cliente,
+                        'status'        => $usuario->status,
+                        'telefono'      => $usuario->telefono,
+                        'fecha_diario'  => $a->fecha_diario, 
+                        'fecha_corte'   => ($usuario && $usuario->pago) ? $usuario->pago->fecha_corte : null,
+                        'dia_nombre'    => $dias[$fecha->format('l')] ?? $fecha->format('l')
+                    ];
+                });
+
+            // STATS CORREGIDOS CON LA SEMANA DE MÉXICO
+            $stats = [];
+            $diasIngles = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+            $diasEspanol = ['LUN', 'MAR', 'MIE', 'JUE', 'VIE'];
+            
+            // Forzamos el inicio de semana según el "hoy" de México
+            $inicioSemana = $hoy->copy()->startOfWeek(Carbon::MONDAY);
+
+            foreach ($diasIngles as $index => $diaNombre) {
+                $fechaDia = $inicioSemana->copy()->addDays($index);
+                
+                $conteo = Asistencia::whereDate('fecha_diario', $fechaDia->toDateString())
+                    ->whereHas('usuario', function($q) use ($sede) {
+                        if ($sede && $sede !== 'ninguno') {
+                            $q->where('sede', $sede);
+                        }
+                    })->count();
+
+                $stats[] = [
+                    'dia'   => $diasEspanol[$index],
+                    'valor' => $conteo
+                ];
+            }
+
+            return response()->json([
+                'status' => true,
+                'data'   => array_values($asistenciasProcesadas->toArray()),
+                'stats'  => $stats
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['status' => false, 'error' => $e->getMessage()], 500);
         }
-
-        return response()->json([
-            'status' => true,
-            'data'   => array_values($asistenciasProcesadas->toArray()),
-            'stats'  => $stats
-        ]);
-
-    } catch (\Exception $e) {
-        return response()->json(['status' => false, 'error' => $e->getMessage()], 500);
     }
-}
 
 
 public function reporteMensual(Request $request)
