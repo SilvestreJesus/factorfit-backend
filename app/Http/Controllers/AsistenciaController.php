@@ -158,42 +158,43 @@ public function reporteMensual(Request $request)
     /**
      * Registrar una nueva asistencia (Desde QR o Manual)
      */
-    public function store(Request $request)
-    {
-        $validated = $request->validate([
-            'clave_cliente' => 'required|string|exists:usuarios,clave_usuario',
-            'fecha_diario'  => 'nullable|date',
-            'porcentaje'    => 'nullable|string|max:8'
-        ]);
+public function store(Request $request)
+{
+    $validated = $request->validate([
+        'clave_cliente' => 'required|string|exists:usuarios,clave_usuario',
+        'fecha_diario'  => 'nullable|date',
+        'porcentaje'    => 'nullable|string|max:8'
+    ]);
 
-        // Si no se envía fecha, usamos la hora actual del servidor
-        $fechaAsistencia = $request->fecha_diario ? Carbon::parse($request->fecha_diario) : Carbon::now();
+    // 1. FORZAR LA HORA DE MÉXICO (O tu zona horaria)
+    $zonaHoraria = 'America/Mexico_City';
+    $ahora = Carbon::now($zonaHoraria);
 
-        // VALIDACIÓN: Evitar que el usuario marque dos veces el mismo día
-        $existeAsistencia = Asistencia::where('clave_cliente', $validated['clave_cliente'])
-            ->whereDate('fecha_diario', $fechaAsistencia->toDateString())
-            ->exists();
+    // 2. VALIDACIÓN: Usar la fecha de México para comparar
+    $existeAsistencia = Asistencia::where('clave_cliente', $validated['clave_cliente'])
+        ->whereDate('fecha_diario', $ahora->toDateString()) // Compara solo Año-Mes-Día
+        ->exists();
 
-        if ($existeAsistencia) {
-            return response()->json([
-                'message' => 'El socio ya registró su entrada el día de hoy'
-            ], 422); // Código 422: Entidad no procesable
-        }
-
-        // Crear registro
-        $asistencia = Asistencia::create([
-            'clave_cliente' => $validated['clave_cliente'],
-            'fecha_diario'  => $fechaAsistencia,
-            'porcentaje'    => $validated['porcentaje'] ?? '100%',
-            'created_at'    => Carbon::now(),
-            'updated_at'    => Carbon::now(),
-        ]);
-
+    if ($existeAsistencia) {
         return response()->json([
-            'message' => 'Asistencia registrada correctamente',
-            'data' => $asistencia
-        ], 201);
+            'message' => 'El socio ya registró su entrada hoy ' . $ahora->format('d-m-Y')
+        ], 422);
     }
+
+    // 3. CREAR REGISTRO CON LA HORA CORRECTA
+    $asistencia = Asistencia::create([
+        'clave_cliente' => $validated['clave_cliente'],
+        'fecha_diario'  => $ahora, // Se guarda con la hora de México
+        'porcentaje'    => $validated['porcentaje'] ?? '100%',
+        'created_at'    => $ahora,
+        'updated_at'    => $ahora,
+    ]);
+
+    return response()->json([
+        'message' => 'Asistencia registrada correctamente',
+        'data' => $asistencia
+    ], 201);
+}
 
     /**
      * Actualizar una asistencia por su ID
