@@ -98,5 +98,6 @@ Route::resource('entrenamientos', EntrenamientosController::class)
 
 // ---------- OTROS SERVICIOS ----------
 Route::post('/enviar-correo', [UsuarioController::class, 'enviarCorreo']);
+Route::post('/enviar-correo2', [UsuarioController::class, 'enviarCorreo2']);
 Route::post('/whatsapp/masivo', [WhatsAppController::class, 'envioMasivo']);
 Route::resource('promociones', PromocionController::class)->only(['index', 'store', 'destroy']);

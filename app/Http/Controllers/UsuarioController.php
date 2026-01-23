@@ -417,6 +417,44 @@ public function enviarCorreo(Request $request)
     }
 }
 
+
+
+public function enviarCorreo2(Request $request)
+{
+    $data = $request->validate([
+        'emails'  => 'required|array',
+        'asunto'  => 'required|string',
+        'mensaje' => 'required|string',
+        'sede'    => 'nullable|string',
+        'imagen'  => 'nullable|string', // Base64 desde Angular
+    ]);
+
+    try {
+        // --- LA CLAVE ---
+        // Renderizamos tu archivo Blade a HTML puro
+        // Importante: No uses $message->embedData dentro del Blade si vas a Node
+        $htmlDiseno = view('emails.formal', [
+            'mensaje' => $data['mensaje'],
+            'sede'    => $data['sede'] ?? 'General',
+            'imagen'  => $data['imagen'] // Pasamos el base64 tal cual
+        ])->render();
+
+        $urlNode = 'https://corrreoservicio-production.up.railway.app/enviar-correo';
+        
+        $response = \Illuminate\Support\Facades\Http::post($urlNode, [
+            'emails'      => $data['emails'],
+            'asunto'      => $data['asunto'],
+            'htmlDirecto' => $htmlDiseno, 
+            'imagen'      => $data['imagen'], // Mandamos la imagen aparte para que Node la procese
+            'tipo'        => 'html_puro'
+        ]);
+
+        return response()->json(['message' => 'Enviado a través de Node']);
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
+    }
+}
+
 public function recuperarPassword(Request $request)
 {
     $request->validate(['email' => 'required|email']);
