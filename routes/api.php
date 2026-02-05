@@ -22,6 +22,7 @@ Route::put('/usuarios/perfil/{clave}', [UsuarioController::class, 'actualizarPer
 // ---------- USUARIOS ----------
 Route::prefix('usuarios')->group(function () {
     // 1. RUTAS ESTÁTICAS (SIEMPRE PRIMERO)
+    Route::get('/respaldo-db', [UsuarioController::class, 'descargarRespaldoDB']); // <-- NUEVA RUTA
     Route::get('/conteos-bitacora', [UsuarioController::class, 'obtenerConteosBitacora']);
     Route::get('/cambios-hoy', [UsuarioController::class, 'contarCambiosHoy']);
     Route::get('/por-sede', [UsuarioController::class, 'usuariosPorSede']);
