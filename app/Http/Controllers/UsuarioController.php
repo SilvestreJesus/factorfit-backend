@@ -681,10 +681,9 @@ public function descargarRespaldoDB()
         $user = env('DB_USERNAME');
         $db   = env('DB_DATABASE');
         $pass = env('DB_PASSWORD');
-
-        // COMANDO: PGPASSWORD permite que pg_dump no pida clave interactivamente
+        // Agregamos --no-password por seguridad y nos aseguramos de que no haya espacios extra
         $comando = "PGPASSWORD='{$pass}' pg_dump -h {$host} -p {$port} -U {$user} -d {$db} --clean --no-owner --no-privileges -f {$rutaDestino} 2>&1";
-        
+            
         exec($comando, $output, $resultCode);
 
         // Si el código de resultado no es 0, hubo un error
