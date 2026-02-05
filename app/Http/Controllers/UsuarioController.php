@@ -668,7 +668,6 @@ public function contarCambiosHoy(Request $request)
     ]);
 }
 
-
 public function descargarRespaldoDB() 
 {
     try {
@@ -676,46 +675,41 @@ public function descargarRespaldoDB()
         $nombreArchivo = "respaldo_{$fecha}.sql";
         $rutaDestino = storage_path("app/{$nombreArchivo}");
 
-        // FORZAMOS la ruta que Nixpacks usa para los binarios instalados
-        $pgDumpPath = '/root/.nix-profile/bin/pg_dump';
-
-        // Si por alguna razón esa ruta no existe, intentamos la estándar
-        if (!file_exists($pgDumpPath)) {
-            $pgDumpPath = 'pg_dump';
-        }
-
+        // Variables de entorno de Railway
         $host = env('DB_HOST');
         $port = env('DB_PORT');
         $user = env('DB_USERNAME');
         $db   = env('DB_DATABASE');
+        $pass = env('DB_PASSWORD');
 
-        // Construcción del comando
-        // Esto fuerza al sistema a buscar los binarios de la versión que instaló Nixpacks primero
-        $comando = "PATH=/root/.nix-profile/bin:\$PATH {$pgDumpPath} -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists --no-owner --no-privileges -f {$rutaDestino} 2>&1";
+        // COMANDO: PGPASSWORD permite que pg_dump no pida clave interactivamente
+        $comando = "PGPASSWORD='{$pass}' pg_dump -h {$host} -p {$port} -U {$user} -d {$db} --clean --no-owner --no-privileges -f {$rutaDestino} 2>&1";
+        
         exec($comando, $output, $resultCode);
 
+        // Si el código de resultado no es 0, hubo un error
         if ($resultCode !== 0) {
             return response()->json([
-                'error' => 'No se pudo crear el respaldo',
-                'codigo' => $resultCode,
+                'error' => 'Error al ejecutar pg_dump',
                 'detalle' => $output,
-                'debug' => [
-                    'path_usado' => $pgDumpPath,
-                    'version_check' => shell_exec("{$pgDumpPath} --version") // Esto nos dirá qué versión está ejecutando realmente
-                ]
+                'codigo' => $resultCode
             ], 500);
         }
-        // ... resto del código igual
 
-        // Verificar si el archivo se creó realmente
+        // Verificar si el archivo se creó físicamente en el storage
         if (!file_exists($rutaDestino)) {
             return response()->json(['error' => 'El archivo no fue generado en el disco'], 500);
         }
 
+        // Descargar y eliminar después de enviar para no llenar el disco del contenedor
         return response()->download($rutaDestino, $nombreArchivo)->deleteFileAfterSend(true);
 
     } catch (\Exception $e) {
-        return response()->json(['error' => $e->getMessage()], 500);
+        return response()->json([
+            'error' => 'Excepción en el servidor',
+            'message' => $e->getMessage()
+        ], 500);
     }
 }
+
 }
