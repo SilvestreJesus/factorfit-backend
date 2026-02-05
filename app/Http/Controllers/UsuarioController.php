@@ -685,8 +685,7 @@ public function descargarRespaldoDB()
 
         // PGPASSWORD ya está en tus variables de entorno, no la pongas en el comando.
         // Agregamos flags para evitar errores de permisos comunes en Railway
-        $comando = "{$pgDumpPath} -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists --no-owner --no-privileges --no-role-warnings -f {$rutaDestino} 2>&1";
-        
+        $comando = "PGPASSWORD='" . env('DB_PASSWORD') . "' {$pgDumpPath} -h " . env('DB_HOST') . " -p " . env('DB_PORT') . " -U " . env('DB_USERNAME') . " -d " . env('DB_DATABASE') . " --clean --if-exists --no-owner --no-privileges --no-password -f {$rutaDestino} 2>&1";
         exec($comando, $output, $resultCode);
 
         if ($resultCode !== 0) {
