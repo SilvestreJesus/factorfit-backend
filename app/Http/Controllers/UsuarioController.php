@@ -675,39 +675,41 @@ public function descargarRespaldoDB()
         $nombreArchivo = "respaldo_{$fecha}.sql";
         $rutaDestino = storage_path("app/{$nombreArchivo}");
 
-        // Variables de entorno de Railway
-        $host = env('DB_HOST');
-        $port = env('DB_PORT');
-        $user = env('DB_USERNAME');
-        $db   = env('DB_DATABASE');
-        $pass = env('DB_PASSWORD');
-        // Agregamos --no-password por seguridad y nos aseguramos de que no haya espacios extra
-        $comando = "PGPASSWORD='{$pass}' pg_dump -h {$host} -p {$port} -U {$user} -d {$db} --clean --no-owner --no-privileges -f {$rutaDestino} 2>&1";
-            
+        // Forzar la creación del directorio si no existe
+        if (!file_exists(storage_path("app"))) {
+            mkdir(storage_path("app"), 0755, true);
+        }
+
+        // Usar los valores directamente de config() es más seguro que env() en producción
+        $host = config('database.connections.pgsql.host');
+        $port = config('database.connections.pgsql.port');
+        $user = config('database.connections.pgsql.username');
+        $db   = config('database.connections.pgsql.database');
+        $pass = config('database.connections.pgsql.password');
+
+        // Comando con flags adicionales para evitar errores de permisos de sistema
+        $comando = "PGPASSWORD='{$pass}' pg_dump -h {$host} -p {$port} -U {$user} -d {$db} --clean --no-owner --no-privileges --no-password -f {$rutaDestino} 2>&1";
+        
         exec($comando, $output, $resultCode);
 
-        // Si el código de resultado no es 0, hubo un error
         if ($resultCode !== 0) {
+            // Esto nos dirá exactamente qué dijo postgres (ej: "role postgres does not exist")
             return response()->json([
-                'error' => 'Error al ejecutar pg_dump',
-                'detalle' => $output,
-                'codigo' => $resultCode
+                'error' => 'Error en pg_dump',
+                'mensaje_sistema' => implode(' ', $output),
+                'host_usado' => $host,
+                'codigo_salida' => $resultCode
             ], 500);
         }
 
-        // Verificar si el archivo se creó físicamente en el storage
         if (!file_exists($rutaDestino)) {
-            return response()->json(['error' => 'El archivo no fue generado en el disco'], 500);
+            return response()->json(['error' => 'Archivo no generado'], 500);
         }
 
-        // Descargar y eliminar después de enviar para no llenar el disco del contenedor
         return response()->download($rutaDestino, $nombreArchivo)->deleteFileAfterSend(true);
 
     } catch (\Exception $e) {
-        return response()->json([
-            'error' => 'Excepción en el servidor',
-            'message' => $e->getMessage()
-        ], 500);
+        return response()->json(['error' => $e->getMessage()], 500);
     }
 }
 
