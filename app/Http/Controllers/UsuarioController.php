@@ -668,30 +668,30 @@ public function contarCambiosHoy(Request $request)
     ]);
 }
 
+
 public function descargarRespaldoDB() 
 {
     try {
         $fecha = date('Y-m-d_H-i-s');
         $nombreArchivo = "respaldo_{$fecha}.sql";
-        
-        // CAMBIO 1: Usar storage_path en lugar de /tmp para evitar problemas de permisos de escritura
         $rutaDestino = storage_path("app/{$nombreArchivo}");
 
-        // CAMBIO 2: Buscar el binario de forma más exhaustiva
-        $pgDumpPath = exec('which pg_dump') ?: '/usr/bin/pg_dump';
+        // FORZAMOS la ruta que Nixpacks usa para los binarios instalados
+        $pgDumpPath = '/root/.nix-profile/bin/pg_dump';
 
-        // CAMBIO 3: Limpiar el comando. 
-        // Eliminamos PGPASSWORD del string (ya que Railway lo tiene en el entorno) 
-        // y usamos el Host interno directamente para mayor velocidad.
+        // Si por alguna razón esa ruta no existe, intentamos la estándar
+        if (!file_exists($pgDumpPath)) {
+            $pgDumpPath = 'pg_dump';
+        }
+
         $host = env('DB_HOST');
         $port = env('DB_PORT');
         $user = env('DB_USERNAME');
         $db   = env('DB_DATABASE');
 
-        // Construcción del comando con flags de compatibilidad total
+        // Construcción del comando
         $comando = "{$pgDumpPath} -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists --no-owner --no-privileges -f {$rutaDestino} 2>&1";
         
-        // Ejecución
         exec($comando, $output, $resultCode);
 
         if ($resultCode !== 0) {
@@ -701,10 +701,11 @@ public function descargarRespaldoDB()
                 'detalle' => $output,
                 'debug' => [
                     'path_usado' => $pgDumpPath,
-                    'host' => $host
+                    'version_check' => shell_exec("{$pgDumpPath} --version") // Esto nos dirá qué versión está ejecutando realmente
                 ]
             ], 500);
         }
+        // ... resto del código igual
 
         // Verificar si el archivo se creó realmente
         if (!file_exists($rutaDestino)) {
