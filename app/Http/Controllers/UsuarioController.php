@@ -672,35 +672,27 @@ public function descargarRespaldoDB()
 {
     try {
         $fecha = date('Y-m-d_H-i-s');
-        $nombreArchivo = "respaldo_factorfit_{$fecha}.sql";
-        $rutaDestino = storage_path("app/{$nombreArchivo}");
+        $nombreArchivo = "respaldo_{$fecha}.sql";
+        // Usamos /tmp porque siempre tiene permisos de escritura en Linux/Railway
+        $rutaDestino = "/tmp/{$nombreArchivo}";
 
-        // Extraemos las variables que sí tienes en tu .env
         $host = env('DB_HOST');
         $port = env('DB_PORT');
         $db   = env('DB_DATABASE');
         $user = env('DB_USERNAME');
-        $pass = env('DB_PASSWORD');
 
-        // Construimos la URI de conexión
-        $dbUrl = "postgresql://{$user}:{$pass}@{$host}:{$port}/{$db}";
-
-        // Ejecutar dump
-        // El 2>&1 es clave para que si falla, el error se guarde en $output
-        $comando = "pg_dump --uri=\"{$dbUrl}\" --clean --if-exists > {$rutaDestino} 2>&1";
+        // IMPORTANTE: PGPASSWORD debe estar en las variables de entorno de Railway 
+        // o definida aquí para que pg_dump no se detenga pidiendo clave.
+        $comando = "pg_dump -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists > {$rutaDestino} 2>&1";
         
         exec($comando, $output, $resultCode);
 
         if ($resultCode !== 0) {
             return response()->json([
-                'error' => 'Error en pg_dump',
-                'detalles' => $output,
-                'comando_intentado' => "pg_dump --uri=postgresql://{$user}:***@{$host}..." 
+                'error' => 'Error al generar respaldo',
+                'logs_terminal' => $output, // Esto nos dirá el error real si vuelve a fallar
+                'codigo_error' => $resultCode
             ], 500);
-        }
-
-        if (!file_exists($rutaDestino)) {
-            return response()->json(['error' => 'El archivo no se creó'], 500);
         }
 
         return response()->download($rutaDestino)->deleteFileAfterSend(true);
