@@ -675,33 +675,30 @@ public function descargarRespaldoDB()
         $nombreArchivo = "respaldo_{$fecha}.sql";
         $rutaDestino = "/tmp/{$nombreArchivo}";
 
-        // Construimos la URI usando las variables que ya tienes
-        $user = env('DB_USERNAME');
-        $pass = env('DB_PASSWORD');
-        $host = env('DB_HOST'); // postgres.railway.internal
+        // Intentamos detectar la ruta del binario
+        $pgDumpPath = exec('which pg_dump') ?: '/usr/bin/pg_dump';
+
+        // Usamos las variables que ya tienes configuradas
+        $host = env('DB_HOST');
         $port = env('DB_PORT');
+        $user = env('DB_USERNAME');
         $db   = env('DB_DATABASE');
 
-        $dbUrl = "postgresql://{$user}:{$pass}@{$host}:{$port}/{$db}";
-
-        // Intentamos con la ruta completa del binario que instala Nixpacks
-        // Probamos primero con 'pg_dump', si falla, Railway nos dirá el motivo.
-        $comando = "pg_dump --uri=\"{$dbUrl}\" --clean --if-exists -f {$rutaDestino} 2>&1";
+        // Nota: PGPASSWORD ya está en el entorno, pg_dump la tomará automáticamente
+        $comando = "{$pgDumpPath} -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists -f {$rutaDestino} 2>&1";
         
         exec($comando, $output, $resultCode);
 
-        // Si falla el código 127 es que no encuentra el comando
         if ($resultCode !== 0) {
             return response()->json([
-                'error' => 'Error en la ejecución del dump',
+                'error' => 'No se pudo crear el respaldo',
                 'codigo' => $resultCode,
-                'detalle' => $output,
-                'entorno' => PHP_OS
+                'debug' => [
+                    'path' => $pgDumpPath,
+                    'salida' => $output,
+                    'usuario_sistema' => exec('whoami')
+                ]
             ], 500);
-        }
-
-        if (!file_exists($rutaDestino)) {
-            return response()->json(['error' => 'Archivo no generado'], 500);
         }
 
         return response()->download($rutaDestino)->deleteFileAfterSend(true);
