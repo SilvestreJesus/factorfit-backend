@@ -2,7 +2,7 @@
 builder = "nixpacks"
 
 [build.nixpacks]
-# Usamos postgresql-17 para asegurar compatibilidad total
+# Cambiamos 'postgresql' por 'postgresql_17'
 pkgs = ["php82", "php82Packages.composer", "postgresql_17"]
 
 [deploy]
