@@ -675,33 +675,33 @@ public function descargarRespaldoDB()
         $nombreArchivo = "respaldo_{$fecha}.sql";
         $rutaDestino = "/tmp/{$nombreArchivo}";
 
-        // Intentamos detectar la ruta del binario
+        // Ya sabemos que Nixpacks lo instaló en esta ruta o similar
         $pgDumpPath = exec('which pg_dump') ?: '/usr/bin/pg_dump';
 
-        // Usamos las variables que ya tienes configuradas
         $host = env('DB_HOST');
         $port = env('DB_PORT');
         $user = env('DB_USERNAME');
         $db   = env('DB_DATABASE');
 
-        // Nota: PGPASSWORD ya está en el entorno, pg_dump la tomará automáticamente
-        $comando = "{$pgDumpPath} -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists -f {$rutaDestino} 2>&1";
+        // PGPASSWORD ya está en tus variables de entorno, no la pongas en el comando.
+        // Agregamos flags para evitar errores de permisos comunes en Railway
+        $comando = "{$pgDumpPath} -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists --no-owner --no-privileges --no-role-warnings -f {$rutaDestino} 2>&1";
         
         exec($comando, $output, $resultCode);
 
         if ($resultCode !== 0) {
             return response()->json([
-                'error' => 'No se pudo crear el respaldo',
+                'error' => 'Error de conexión o permisos en la DB',
                 'codigo' => $resultCode,
-                'debug' => [
-                    'path' => $pgDumpPath,
-                    'salida' => $output,
-                    'usuario_sistema' => exec('whoami')
+                'detalle' => $output, // Esto nos dirá exactamente qué dijo Postgres
+                'debug_info' => [
+                    'db_host' => $host,
+                    'db_user' => $user
                 ]
             ], 500);
         }
 
-        return response()->download($rutaDestino)->deleteFileAfterSend(true);
+        return response()->download($rutaDestino, $nombreArchivo)->deleteFileAfterSend(true);
 
     } catch (\Exception $e) {
         return response()->json(['error' => $e->getMessage()], 500);
