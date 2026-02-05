@@ -690,8 +690,8 @@ public function descargarRespaldoDB()
         $db   = env('DB_DATABASE');
 
         // Construcción del comando
-        $comando = "{$pgDumpPath} -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists --no-owner --no-privileges -f {$rutaDestino} 2>&1";
-        
+        // Esto fuerza al sistema a buscar los binarios de la versión que instaló Nixpacks primero
+        $comando = "PATH=/root/.nix-profile/bin:\$PATH {$pgDumpPath} -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists --no-owner --no-privileges -f {$rutaDestino} 2>&1";
         exec($comando, $output, $resultCode);
 
         if ($resultCode !== 0) {
