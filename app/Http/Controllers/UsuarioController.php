@@ -218,6 +218,7 @@ public function store(Request $request)
         'email'     => 'sometimes|email|unique:usuarios,email,' . $usuario->clave_usuario . ',clave_usuario',
         'telefono'  => 'sometimes|string|max:15',
         'password'  => 'nullable|string|min:6',
+        'peso_inicial'     => 'sometimes|string|max:25',
         'ruta_imagen' => 'nullable|string'
     ]);
 
