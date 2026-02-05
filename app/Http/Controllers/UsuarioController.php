@@ -672,35 +672,36 @@ public function descargarRespaldoDB()
 {
     try {
         $fecha = date('Y-m-d_H-i-s');
-        $nombreArchivo = "respaldo_factorfit_{$fecha}.sql";
+        $nombreArchivo = "respaldo_{$fecha}.sql";
         $rutaDestino = "/tmp/{$nombreArchivo}";
 
-        // Usamos los valores de tu .env
-        $host = env('DB_HOST');
-        $port = env('DB_PORT');
-        $db   = env('DB_DATABASE');
+        // Construimos la URI usando las variables que ya tienes
         $user = env('DB_USERNAME');
         $pass = env('DB_PASSWORD');
+        $host = env('DB_HOST'); // postgres.railway.internal
+        $port = env('DB_PORT');
+        $db   = env('DB_DATABASE');
 
-        // Construimos la URI completa. Este formato raramente falla en Railway.
         $dbUrl = "postgresql://{$user}:{$pass}@{$host}:{$port}/{$db}";
 
-        // Ejecutamos usando la flag --uri que encapsula todo
-        $comando = "pg_dump --uri=\"{$dbUrl}\" --clean --if-exists > {$rutaDestino} 2>&1";
+        // Intentamos con la ruta completa del binario que instala Nixpacks
+        // Probamos primero con 'pg_dump', si falla, Railway nos dirá el motivo.
+        $comando = "pg_dump --uri=\"{$dbUrl}\" --clean --if-exists -f {$rutaDestino} 2>&1";
         
         exec($comando, $output, $resultCode);
 
+        // Si falla el código 127 es que no encuentra el comando
         if ($resultCode !== 0) {
             return response()->json([
-                'error' => 'Error al generar respaldo',
-                'detalle_terminal' => $output, 
-                'ayuda' => 'Verifica que NIXPACKS_PKGS incluya postgresql en Railway'
+                'error' => 'Error en la ejecución del dump',
+                'codigo' => $resultCode,
+                'detalle' => $output,
+                'entorno' => PHP_OS
             ], 500);
         }
 
-        // Verificamos que el archivo realmente exista y tenga contenido
-        if (!file_exists($rutaDestino) || filesize($rutaDestino) === 0) {
-            return response()->json(['error' => 'El archivo de respaldo está vacío o no se creó'], 500);
+        if (!file_exists($rutaDestino)) {
+            return response()->json(['error' => 'Archivo no generado'], 500);
         }
 
         return response()->download($rutaDestino)->deleteFileAfterSend(true);
