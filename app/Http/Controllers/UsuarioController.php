@@ -667,4 +667,28 @@ public function contarCambiosHoy(Request $request)
         'total' => $totalFinal > 0 ? $totalFinal : 0
     ]);
 }
+
+
+public function descargarRespaldoDB() {
+    // 1. Nombre del archivo
+    $nombreArchivo = "respaldo_gym_" . date('Y-m-d_H-i-s') . ".sql";
+    $rutaDestino = storage_path("app/public/" . $nombreArchivo);
+
+    // 2. Obtener la URL de conexión de Railway desde el .env
+    // Railway proporciona DATABASE_URL que tiene el formato postgres://user:pass@host:port/db
+    $dbUrl = env('DATABASE_URL');
+
+    // 3. Ejecutar pg_dump usando la URI
+    // Nota: El servidor donde corre Laravel debe tener instalado postgres-client
+    $comando = "pg_dump --uri={$dbUrl} --clean --if-exists > {$rutaDestino} 2>&1";
+    
+    exec($comando, $output, $resultCode);
+
+    if ($resultCode !== 0) {
+        return response()->json(['error' => 'Error al generar respaldo', 'detalles' => $output], 500);
+    }
+
+    // 4. Retornar el archivo y borrarlo después de enviar
+    return response()->download($rutaDestino)->deleteFileAfterSend(true);
+}
 }
