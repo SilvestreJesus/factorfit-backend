@@ -668,27 +668,45 @@ public function contarCambiosHoy(Request $request)
     ]);
 }
 
+public function descargarRespaldoDB() 
+{
+    try {
+        $fecha = date('Y-m-d_H-i-s');
+        $nombreArchivo = "respaldo_factorfit_{$fecha}.sql";
+        $rutaDestino = storage_path("app/{$nombreArchivo}");
 
-public function descargarRespaldoDB() {
-    // 1. Nombre del archivo
-    $nombreArchivo = "respaldo_gym_" . date('Y-m-d_H-i-s') . ".sql";
-    $rutaDestino = storage_path("app/public/" . $nombreArchivo);
+        // Extraemos las variables que sí tienes en tu .env
+        $host = env('DB_HOST');
+        $port = env('DB_PORT');
+        $db   = env('DB_DATABASE');
+        $user = env('DB_USERNAME');
+        $pass = env('DB_PASSWORD');
 
-    // 2. Obtener la URL de conexión de Railway desde el .env
-    // Railway proporciona DATABASE_URL que tiene el formato postgres://user:pass@host:port/db
-    $dbUrl = env('DATABASE_URL');
+        // Construimos la URI de conexión
+        $dbUrl = "postgresql://{$user}:{$pass}@{$host}:{$port}/{$db}";
 
-    // 3. Ejecutar pg_dump usando la URI
-    // Nota: El servidor donde corre Laravel debe tener instalado postgres-client
-    $comando = "pg_dump --uri={$dbUrl} --clean --if-exists > {$rutaDestino} 2>&1";
-    
-    exec($comando, $output, $resultCode);
+        // Ejecutar dump
+        // El 2>&1 es clave para que si falla, el error se guarde en $output
+        $comando = "pg_dump --uri=\"{$dbUrl}\" --clean --if-exists > {$rutaDestino} 2>&1";
+        
+        exec($comando, $output, $resultCode);
 
-    if ($resultCode !== 0) {
-        return response()->json(['error' => 'Error al generar respaldo', 'detalles' => $output], 500);
+        if ($resultCode !== 0) {
+            return response()->json([
+                'error' => 'Error en pg_dump',
+                'detalles' => $output,
+                'comando_intentado' => "pg_dump --uri=postgresql://{$user}:***@{$host}..." 
+            ], 500);
+        }
+
+        if (!file_exists($rutaDestino)) {
+            return response()->json(['error' => 'El archivo no se creó'], 500);
+        }
+
+        return response()->download($rutaDestino)->deleteFileAfterSend(true);
+
+    } catch (\Exception $e) {
+        return response()->json(['error' => $e->getMessage()], 500);
     }
-
-    // 4. Retornar el archivo y borrarlo después de enviar
-    return response()->download($rutaDestino)->deleteFileAfterSend(true);
 }
 }
