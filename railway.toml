@@ -2,11 +2,8 @@
 builder = "nixpacks"
 
 [build.nixpacks]
-# Agregamos los paquetes necesarios. 
-# 'postgresql' instala el cliente (incluye pg_dump)
-pkgs = ["php82", "php82Packages.composer", "postgresql"]
+# Usamos postgresql-17 para asegurar compatibilidad total
+pkgs = ["php82", "php82Packages.composer", "postgresql_17"]
 
 [deploy]
-# En producción, Railway prefiere que usemos procesos optimizados.
-# Si prefieres seguir con artisan, asegúrate de que no bloquee el sistema.
 startCommand = "php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=$PORT"
