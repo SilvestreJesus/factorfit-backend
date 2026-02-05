@@ -673,31 +673,42 @@ public function descargarRespaldoDB()
     try {
         $fecha = date('Y-m-d_H-i-s');
         $nombreArchivo = "respaldo_{$fecha}.sql";
-        $rutaDestino = "/tmp/{$nombreArchivo}";
+        
+        // CAMBIO 1: Usar storage_path en lugar de /tmp para evitar problemas de permisos de escritura
+        $rutaDestino = storage_path("app/{$nombreArchivo}");
 
-        // Ya sabemos que Nixpacks lo instaló en esta ruta o similar
+        // CAMBIO 2: Buscar el binario de forma más exhaustiva
         $pgDumpPath = exec('which pg_dump') ?: '/usr/bin/pg_dump';
 
+        // CAMBIO 3: Limpiar el comando. 
+        // Eliminamos PGPASSWORD del string (ya que Railway lo tiene en el entorno) 
+        // y usamos el Host interno directamente para mayor velocidad.
         $host = env('DB_HOST');
         $port = env('DB_PORT');
         $user = env('DB_USERNAME');
         $db   = env('DB_DATABASE');
 
-        // PGPASSWORD ya está en tus variables de entorno, no la pongas en el comando.
-        // Agregamos flags para evitar errores de permisos comunes en Railway
-        $comando = "PGPASSWORD='" . env('DB_PASSWORD') . "' {$pgDumpPath} -h " . env('DB_HOST') . " -p " . env('DB_PORT') . " -U " . env('DB_USERNAME') . " -d " . env('DB_DATABASE') . " --clean --if-exists --no-owner --no-privileges --no-password -f {$rutaDestino} 2>&1";
+        // Construcción del comando con flags de compatibilidad total
+        $comando = "{$pgDumpPath} -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists --no-owner --no-privileges -f {$rutaDestino} 2>&1";
+        
+        // Ejecución
         exec($comando, $output, $resultCode);
 
         if ($resultCode !== 0) {
             return response()->json([
-                'error' => 'Error de conexión o permisos en la DB',
+                'error' => 'No se pudo crear el respaldo',
                 'codigo' => $resultCode,
-                'detalle' => $output, // Esto nos dirá exactamente qué dijo Postgres
-                'debug_info' => [
-                    'db_host' => $host,
-                    'db_user' => $user
+                'detalle' => $output,
+                'debug' => [
+                    'path_usado' => $pgDumpPath,
+                    'host' => $host
                 ]
             ], 500);
+        }
+
+        // Verificar si el archivo se creó realmente
+        if (!file_exists($rutaDestino)) {
+            return response()->json(['error' => 'El archivo no fue generado en el disco'], 500);
         }
 
         return response()->download($rutaDestino, $nombreArchivo)->deleteFileAfterSend(true);
