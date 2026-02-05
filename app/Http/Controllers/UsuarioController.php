@@ -672,27 +672,35 @@ public function descargarRespaldoDB()
 {
     try {
         $fecha = date('Y-m-d_H-i-s');
-        $nombreArchivo = "respaldo_{$fecha}.sql";
-        // Usamos /tmp porque siempre tiene permisos de escritura en Linux/Railway
+        $nombreArchivo = "respaldo_factorfit_{$fecha}.sql";
         $rutaDestino = "/tmp/{$nombreArchivo}";
 
+        // Usamos los valores de tu .env
         $host = env('DB_HOST');
         $port = env('DB_PORT');
         $db   = env('DB_DATABASE');
         $user = env('DB_USERNAME');
+        $pass = env('DB_PASSWORD');
 
-        // IMPORTANTE: PGPASSWORD debe estar en las variables de entorno de Railway 
-        // o definida aquí para que pg_dump no se detenga pidiendo clave.
-        $comando = "pg_dump -h {$host} -p {$port} -U {$user} -d {$db} --clean --if-exists > {$rutaDestino} 2>&1";
+        // Construimos la URI completa. Este formato raramente falla en Railway.
+        $dbUrl = "postgresql://{$user}:{$pass}@{$host}:{$port}/{$db}";
+
+        // Ejecutamos usando la flag --uri que encapsula todo
+        $comando = "pg_dump --uri=\"{$dbUrl}\" --clean --if-exists > {$rutaDestino} 2>&1";
         
         exec($comando, $output, $resultCode);
 
         if ($resultCode !== 0) {
             return response()->json([
                 'error' => 'Error al generar respaldo',
-                'logs_terminal' => $output, // Esto nos dirá el error real si vuelve a fallar
-                'codigo_error' => $resultCode
+                'detalle_terminal' => $output, 
+                'ayuda' => 'Verifica que NIXPACKS_PKGS incluya postgresql en Railway'
             ], 500);
+        }
+
+        // Verificamos que el archivo realmente exista y tenga contenido
+        if (!file_exists($rutaDestino) || filesize($rutaDestino) === 0) {
+            return response()->json(['error' => 'El archivo de respaldo está vacío o no se creó'], 500);
         }
 
         return response()->download($rutaDestino)->deleteFileAfterSend(true);
