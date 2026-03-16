@@ -55,7 +55,7 @@ Route::get('/pagos/bitacora', [PagoController::class, 'bitacora']);
 Route::get('/pagos/bitacora-recuperacion', [PagoController::class, 'bitacoraRecuperacion']);
 Route::resource('pagos', PagoController::class)->except(['create', 'edit']);
 Route::get('/buscar/pagos/{texto}', [PagoController::class, 'buscar']);
-
+Route::get('/pagos/sanear-fechas', [PagoController::class, 'corregirFechasCorteInconsistentes']);
 // ---------- PERSONAL ----------
 Route::post('personal/destruir-imagen', [PersonalController::class, 'destruirImagen']);
 Route::resource('personal', PersonalController::class)
