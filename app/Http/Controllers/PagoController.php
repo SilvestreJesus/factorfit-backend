@@ -273,36 +273,38 @@ public function bitacora(Request $request)
 
 public function corregirFechasCorteInconsistentes()
 {
-    $pagos = Pago::whereNotNull('fecha_corte')->get();
+    // 1. Buscamos solo los que ingresaron en Marzo 2026
+    $pagos = Pago::with('usuario')
+        ->whereYear('fecha_ingreso', 2026)
+        ->whereMonth('fecha_ingreso', 3)
+        ->get();
+
     $corregidos = 0;
 
     foreach ($pagos as $pago) {
-        $fecha = \Carbon\Carbon::parse($pago->fecha_corte);
-        $diaActual = $fecha->day;
-
-        // Solo actuamos si el día NO es 01 ni 15
-        if ($diaActual !== 1 && $diaActual !== 15) {
+        $fechaCorte = \Carbon\Carbon::parse($pago->fecha_corte);
+        
+        // --- FILTROS ESTRICTOS ---
+        // 1. Que su corte sea de Marzo (Mes 3)
+        // 2. Que el día de ese corte sea el 01
+        // 3. Que ya tenga registrado el pago de $500 o más
+        if ($fechaCorte->month == 3 && $fechaCorte->day == 1 && $pago->monto_pagado >= 500) {
             
-            // 1. PRIORIDAD TOTAL: Lo que diga la columna "Tipo_pago"
-            if ($pago->Tipo_pago === 'Mensual') {
-                $fecha->day(1);
-            } 
-            elseif ($pago->Tipo_pago === 'Quincenal') {
-                $fecha->day(15);
-            } 
-            // 2. CASO DE EMERGENCIA: Si el Tipo_pago está vacío, usamos el monto como referencia
-            else {
-                if ($pago->monto_pagado >= 500) {
-                    $fecha->day(1);
-                    $pago->Tipo_pago = 'Mensual';
-                } else {
-                    $fecha->day(15);
-                    $pago->Tipo_pago = 'Quincenal';
-                }
+            // Limpiamos los cobros generados por error
+            $pago->monto_pendiente = 0;
+            $pago->monto_recargo = 0;
+
+            // Movemos el corte al 01 de Abril (Mes 4)
+            // Esto es vital para que el sistema ya no los vea como "vencidos" hoy 15 de marzo
+            $pago->fecha_corte = \Carbon\Carbon::create(2026, 4, 1, 0, 0, 0);
+            $pago->Tipo_pago = 'Mensual';
+
+            // Aseguramos que el status del usuario sea activo
+            if ($pago->usuario) {
+                $pago->usuario->status = 'activo';
+                $pago->usuario->save();
             }
 
-            // Guardamos con la hora reseteada para evitar el error del "día 31"
-            $pago->fecha_corte = $fecha->startOfDay();
             $pago->save();
             $corregidos++;
         }
@@ -310,7 +312,7 @@ public function corregirFechasCorteInconsistentes()
 
     return response()->json([
         'status' => true,
-        'message' => "Base de datos saneada. Se corrigieron $corregidos registros."
+        'message' => "Saneamiento completado. Se corrigieron $corregidos usuarios nuevos de Marzo (Día 01) que ya habían pagado."
     ]);
 }
 
