@@ -270,7 +270,7 @@ public function bitacora(Request $request)
     }
 }
 
-
+/*
 public function corregirFechasCorteInconsistentes()
 {
     // 1. Buscamos solo los que ingresaron en Marzo 2026
@@ -314,6 +314,6 @@ public function corregirFechasCorteInconsistentes()
         'status' => true,
         'message' => "Saneamiento completado. Se corrigieron $corregidos usuarios nuevos de Marzo (Día 01) que ya habían pagado."
     ]);
-}
+}*/
 
 }
