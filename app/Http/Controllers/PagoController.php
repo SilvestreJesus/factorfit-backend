@@ -46,7 +46,7 @@ class PagoController extends Controller
             'monto_pendiente' => 'nullable|numeric',
             'monto_recargo' => 'nullable|numeric',
         ]);
-
+        $validated['monto_pagado'] = $validated['monto_pagado'] ?? 0;
         $pago = Pago::create($validated);
 
         return response()->json(['message' => 'Pago registrado', 'pago' => $pago], 201);
@@ -271,6 +271,47 @@ public function bitacora(Request $request)
 }
 
 
+public function corregirFechasCorteInconsistentes()
+{
+    $pagos = Pago::whereNotNull('fecha_corte')->get();
+    $corregidos = 0;
 
+    foreach ($pagos as $pago) {
+        $fecha = \Carbon\Carbon::parse($pago->fecha_corte);
+        $diaActual = $fecha->day;
+
+        // Solo actuamos si el día NO es 01 ni 15
+        if ($diaActual !== 1 && $diaActual !== 15) {
+            
+            // 1. PRIORIDAD TOTAL: Lo que diga la columna "Tipo_pago"
+            if ($pago->Tipo_pago === 'Mensual') {
+                $fecha->day(1);
+            } 
+            elseif ($pago->Tipo_pago === 'Quincenal') {
+                $fecha->day(15);
+            } 
+            // 2. CASO DE EMERGENCIA: Si el Tipo_pago está vacío, usamos el monto como referencia
+            else {
+                if ($pago->monto_pagado >= 500) {
+                    $fecha->day(1);
+                    $pago->Tipo_pago = 'Mensual';
+                } else {
+                    $fecha->day(15);
+                    $pago->Tipo_pago = 'Quincenal';
+                }
+            }
+
+            // Guardamos con la hora reseteada para evitar el error del "día 31"
+            $pago->fecha_corte = $fecha->startOfDay();
+            $pago->save();
+            $corregidos++;
+        }
+    }
+
+    return response()->json([
+        'status' => true,
+        'message' => "Base de datos saneada. Se corrigieron $corregidos registros."
+    ]);
+}
 
 }
